@@ -221,6 +221,8 @@ export default function App() {
     }));
   };
 
+  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
   const fetchData = async () => {
     if (!homeTeam || !awayTeam) { setError("Please select both teams."); return; }
     if (homeTeam === awayTeam) { setError("Please select two different teams."); return; }
@@ -228,6 +230,8 @@ export default function App() {
     try {
       setStatusMsg(`Fetching stats & injuries for ${homeTeam}...`);
       const hd = await fetchTeamAnalysis(homeTeam);
+      setStatusMsg(`Waiting a moment before next request...`);
+      await sleep(3000);
       setStatusMsg(`Fetching stats & injuries for ${awayTeam}...`);
       const ad = await fetchTeamAnalysis(awayTeam);
       setHomeData(hd); setAwayData(ad);

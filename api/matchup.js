@@ -14,7 +14,7 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001", max_tokens: 1200,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{ role: "user", content: "Search NBA stats 2025-26 season for the " + team + ". List: 1) team record wins-losses 2) team PPG and opponent PPG 3) EVERY player on roster with their individual points per game averages this season. I need all 13-15 players." }]
+          messages: [{ role: "user", content: "Search for the current " + team + " NBA roster as of March 2026. Who is currently on the team right now in 2026? List each active player and their 2025-26 season points per game average. Also include the team current wins and losses." }]
         })
       });
       const d = await r.json();
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514", max_tokens: 2500,
         system: "Output only a single raw JSON object. No markdown, no explanation, no code fences.",
-        messages: [{ role: "user", content: "Convert NBA data to JSON.\n\n" + awayTeam + ":\n" + t1.slice(0,2000) + "\n\n" + homeTeam + ":\n" + t2.slice(0,2000) + "\n\nReturn ONLY valid JSON:\n{\"away\":{\"wins\":0,\"losses\":0,\"ppg\":112,\"opp\":110,\"efg_pct\":0.52,\"tov_rate\":13,\"oreb_pct\":0.25,\"ftr\":0.22,\"opp_efg_pct\":0.52,\"opp_tov_rate\":13,\"opp_oreb_pct\":0.25,\"opp_ftr\":0.22,\"last10\":\"5-5\",\"last10_ppg\":112,\"last10_opp\":110,\"roster\":[{\"name\":\"Player Name\",\"ppg\":20.0,\"per\":17.0,\"role\":\"STAR\",\"status\":\"PLAYING\"}]},\"home\":{same}}\nRules: Include ALL players found for each team (target 12+). role=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.85. Do not truncate the roster arrays." }]
+        messages: [{ role: "user", content: "Convert current March 2026 NBA roster data to JSON.\n\n" + awayTeam + " (away):\n" + t1.slice(0,2000) + "\n\n" + homeTeam + " (home):\n" + t2.slice(0,2000) + "\n\nReturn ONLY valid JSON:\n{\"away\":{\"wins\":0,\"losses\":0,\"ppg\":112,\"opp\":110,\"efg_pct\":0.52,\"tov_rate\":13,\"oreb_pct\":0.25,\"ftr\":0.22,\"opp_efg_pct\":0.52,\"opp_tov_rate\":13,\"opp_oreb_pct\":0.25,\"opp_ftr\":0.22,\"last10\":\"5-5\",\"last10_ppg\":112,\"last10_opp\":110,\"roster\":[{\"name\":\"Player Name\",\"ppg\":20.0,\"per\":17.0,\"role\":\"STAR\",\"status\":\"PLAYING\"}]},\"home\":{same}}\nCRITICAL: Only include players currently on each team as of March 2026. Do not include traded or waived players. role=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.85. Include all active roster players found." }]
       })
     });
     const fd = await fmt.json();

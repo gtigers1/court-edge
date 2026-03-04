@@ -7,20 +7,35 @@ export default async function handler(req, res) {
   const { homeTeam, awayTeam } = req.body || {};
   if (!homeTeam || !awayTeam) return res.status(400).json({ error: "homeTeam and awayTeam required" });
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    // Step 1: Search for raw stats
+    const search = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2000,
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1500,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
-        system: "Output only raw JSON. No text, no markdown.",
-        messages: [{ role: "user", content: "Get 2025-26 NBA stats for " + awayTeam + " and " + homeTeam + ". Return ONLY this JSON structure with real values: {\"home\":{\"wins\":0,\"losses\":0,\"ppg\":0,\"opp\":0,\"efg_pct\":0,\"tov_rate\":0,\"oreb_pct\":0,\"ftr\":0,\"opp_efg_pct\":0,\"opp_tov_rate\":0,\"opp_oreb_pct\":0,\"opp_ftr\":0,\"last10\":\"0-0\",\"last10_ppg\":0,\"last10_opp\":0,\"roster\":[{\"name\":\"\",\"ppg\":0,\"per\":0,\"role\":\"\",\"status\":\"PLAYING\"}]},\"away\":{...same fields...}} All 13-15 active players per team. role=STAR/KEY/ROLE by ppg." }]
+        messages: [{ role: "user", content: "Search: current 2025-26 NBA season stats wins losses ppg opp for " + awayTeam + " and " + homeTeam + " plus their top 10 players ppg" }]
       })
     });
-    const data = await response.json();
-    if (!response.ok) return res.status(502).json({ error: data.error?.message || "Upstream error" });
-    const raw = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+    const sd = await search.json();
+    if (!search.ok) return res.status(502).json({ error: sd.error?.message || "Search error" });
+    const searchText = (sd.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+
+    // Step 2: Format into JSON with a tiny prompt
+    const format = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1500,
+        system: "Output only raw JSON, no markdown.",
+        messages: [{ role: "user", content: "Format this NBA data into JSON. Home=" + homeTeam + " Away=" + awayTeam + ".\n\nData:\n" + searchText.slice(0, 2000) + "\n\nReturn: {\"home\":{\"wins\":0,\"losses\":0,\"ppg\":0,\"opp\":0,\"efg_pct\":0.52,\"tov_rate\":13,\"oreb_pct\":0.25,\"ftr\":0.22,\"opp_efg_pct\":0.52,\"opp_tov_rate\":13,\"opp_oreb_pct\":0.25,\"opp_ftr\":0.22,\"last10\":\"5-5\",\"last10_ppg\":112,\"last10_opp\":110,\"roster\":[{\"name\":\"Player\",\"ppg\":20,\"per\":18,\"role\":\"STAR\",\"status\":\"PLAYING\"}]},\"away\":{same fields}} Use real values from data. Include all players found. role=STAR if ppg>20, KEY if ppg>11, else ROLE." }]
+      })
+    });
+    const fd = await format.json();
+    if (!format.ok) return res.status(502).json({ error: fd.error?.message || "Format error" });
+    const raw = (fd.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
     let parsed = null;
     try { parsed = JSON.parse(raw); } catch(_) {}
     if (!parsed) { try { parsed = JSON.parse(raw.replace(/^```json\s*/i,"").replace(/\s*```$/,"")); } catch(_) {} }

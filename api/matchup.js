@@ -12,9 +12,10 @@ export default async function handler(req, res) {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001", max_tokens: 1500,
+          model: "claude-sonnet-4-20250514", max_tokens: 1000,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{ role: "user", content: "It is March 2026. Search for the " + team + " current NBA roster right now. Find their active players list for the 2025-26 season including any recent trades or signings. List every player currently on the roster with their points per game this season. Also find their current win-loss record and team scoring stats." }]
+          system: "Search for current NBA information and return a concise summary of the facts found.",
+          messages: [{ role: "user", content: "Search: " + team + " NBA roster March 2026 current players stats. Find who is currently on the " + team + " active roster right now and their points per game this season. Include team wins and losses." }]
         })
       });
       const d = await r.json();
@@ -26,9 +27,9 @@ export default async function handler(req, res) {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514", max_tokens: 1500,
-          system: "Output only a single raw JSON object. No markdown, no explanation, no code fences.",
-          messages: [{ role: "user", content: "Convert this " + team + " NBA roster data to JSON.\n\nData:\n" + data.slice(0,2500) + "\n\nJSON format:\n{\"wins\":0,\"losses\":0,\"ppg\":112,\"opp\":110,\"efg_pct\":0.52,\"tov_rate\":13,\"oreb_pct\":0.25,\"ftr\":0.22,\"opp_efg_pct\":0.52,\"opp_tov_rate\":13,\"opp_oreb_pct\":0.25,\"opp_ftr\":0.22,\"last10\":\"5-5\",\"last10_ppg\":112,\"last10_opp\":110,\"roster\":[{\"name\":\"Player Name\",\"ppg\":20.0,\"per\":17.0,\"role\":\"STAR\",\"status\":\"PLAYING\"}]}\nRules: Only players on the current roster (March 2026). role=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.85. Estimate team ppg/opp from context if not given." }]
+          model: "claude-sonnet-4-20250514", max_tokens: 1200,
+          system: "Output only a single raw JSON object. No markdown, no explanation.",
+          messages: [{ role: "user", content: "Convert to JSON for " + team + ":\n" + data.slice(0,2000) + "\n\nReturn:\n{\"wins\":0,\"losses\":0,\"ppg\":112,\"opp\":110,\"efg_pct\":0.52,\"tov_rate\":13,\"oreb_pct\":0.25,\"ftr\":0.22,\"opp_efg_pct\":0.52,\"opp_tov_rate\":13,\"opp_oreb_pct\":0.25,\"opp_ftr\":0.22,\"last10\":\"5-5\",\"last10_ppg\":112,\"last10_opp\":110,\"roster\":[{\"name\":\"Player\",\"ppg\":20.0,\"per\":17.0,\"role\":\"STAR\",\"status\":\"PLAYING\"}]}\nOnly current roster players. role=STAR/>20ppg, KEY/>11ppg, else ROLE. per=ppg*0.85." }]
         })
       });
       const d = await r.json();

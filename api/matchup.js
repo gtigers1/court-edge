@@ -7,40 +7,27 @@ export default async function handler(req, res) {
   const { homeTeam, awayTeam } = req.body || {};
   if (!homeTeam || !awayTeam) return res.status(400).json({ error: "homeTeam and awayTeam required" });
   try {
-    // Search 1: away team roster
-    const s1 = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001", max_tokens: 1000,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{ role: "user", content: "List every player on the " + awayTeam + " 2025-26 NBA roster with their points per game this season. Include wins and losses record." }]
-      })
-    });
-    const d1 = await s1.json();
-    const t1 = (d1.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-
-    // Search 2: home team roster
-    const s2 = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001", max_tokens: 1000,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{ role: "user", content: "List every player on the " + homeTeam + " 2025-26 NBA roster with their points per game this season. Include wins and losses record." }]
-      })
-    });
-    const d2 = await s2.json();
-    const t2 = (d2.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-
-    // Format into JSON
+    const search = async (team) => {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001", max_tokens: 1200,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [{ role: "user", content: "Search NBA stats 2025-26 season for the " + team + ". List: 1) team record wins-losses 2) team PPG and opponent PPG 3) EVERY player on roster with their individual points per game averages this season. I need all 13-15 players." }]
+        })
+      });
+      const d = await r.json();
+      return (d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+    };
+    const [t1, t2] = await Promise.all([search(awayTeam), search(homeTeam)]);
     const fmt = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514", max_tokens: 2500,
         system: "Output only a single raw JSON object. No markdown, no explanation, no code fences.",
-        messages: [{ role: "user", content: "Convert to JSON.\n\n" + awayTeam + " data:\n" + t1.slice(0,1500) + "\n\n" + homeTeam + " data:\n" + t2.slice(0,1500) + "\n\nReturn ONLY this JSON (fill ALL players found, keep every player listed):\n{\"away\":{\"wins\":0,\"losses\":0,\"ppg\":112,\"opp\":110,\"efg_pct\":0.52,\"tov_rate\":13,\"oreb_pct\":0.25,\"ftr\":0.22,\"opp_efg_pct\":0.52,\"opp_tov_rate\":13,\"opp_oreb_pct\":0.25,\"opp_ftr\":0.22,\"last10\":\"5-5\",\"last10_ppg\":112,\"last10_opp\":110,\"roster\":[{\"name\":\"Full Name\",\"ppg\":20.0,\"per\":17.0,\"role\":\"STAR\",\"status\":\"PLAYING\"}]},\"home\":{same structure}}\nrole=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.85. Include EVERY player from the data." }]
+        messages: [{ role: "user", content: "Convert NBA data to JSON.\n\n" + awayTeam + ":\n" + t1.slice(0,2000) + "\n\n" + homeTeam + ":\n" + t2.slice(0,2000) + "\n\nReturn ONLY valid JSON:\n{\"away\":{\"wins\":0,\"losses\":0,\"ppg\":112,\"opp\":110,\"efg_pct\":0.52,\"tov_rate\":13,\"oreb_pct\":0.25,\"ftr\":0.22,\"opp_efg_pct\":0.52,\"opp_tov_rate\":13,\"opp_oreb_pct\":0.25,\"opp_ftr\":0.22,\"last10\":\"5-5\",\"last10_ppg\":112,\"last10_opp\":110,\"roster\":[{\"name\":\"Player Name\",\"ppg\":20.0,\"per\":17.0,\"role\":\"STAR\",\"status\":\"PLAYING\"}]},\"home\":{same}}\nRules: Include ALL players found for each team (target 12+). role=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.85. Do not truncate the roster arrays." }]
       })
     });
     const fd = await fmt.json();

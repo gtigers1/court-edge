@@ -68,10 +68,11 @@ async function fetchInjuries(teamName, topPlayers) {
   try {
     const id = ESPN_IDS[teamName];
     if (!id) return [];
-    // Use our Vercel proxy to avoid CORS issues with ESPN API
     const resp = await fetch(`/api/injuries?teamId=${id}`);
     if (!resp.ok) return [];
     const data = await resp.json();
+    // Log debug info to browser console
+    if (data.debug) console.log("Injury debug for", teamName, data.debug);
     return (data.injuries || []).map(inj => {
       const matched = topPlayers.find(p =>
         p.name.toLowerCase().includes(inj.name.split(" ").at(-1).toLowerCase())
@@ -85,7 +86,7 @@ async function fetchInjuries(teamName, topPlayers) {
         role: matched?.role || "ROLE"
       };
     });
-  } catch(e) { return []; }
+  } catch(e) { console.error("fetchInjuries error:", e); return []; }
 }
 
 // Fetch real NBA stats from balldontlie free API

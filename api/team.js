@@ -7,31 +7,34 @@ export default async function handler(req, res) {
   const { team, sport } = req.body || {};
   if (!team) return res.status(400).json({ error: "team required" });
 
-  const NBA_ESPN = {"Atlanta Hawks":"Atl","Boston Celtics":"Bos","Brooklyn Nets":"BKN","Charlotte Hornets":"Cha","Chicago Bulls":"Chi","Cleveland Cavaliers":"Cle","Dallas Mavericks":"Dal","Denver Nuggets":"Den","Detroit Pistons":"Det","Golden State Warriors":"GS","Houston Rockets":"Hou","Indiana Pacers":"Ind","LA Clippers":"LAC","Los Angeles Lakers":"LAL","Memphis Grizzlies":"Mem","Miami Heat":"Mia","Milwaukee Bucks":"Mil","Minnesota Timberwolves":"Min","New Orleans Pelicans":"NO","New York Knicks":"NY","Oklahoma City Thunder":"Okc","Orlando Magic":"Orl","Philadelphia 76ers":"Phi","Phoenix Suns":"PHX","Portland Trail Blazers":"Por","Sacramento Kings":"Sac","San Antonio Spurs":"SA","Toronto Raptors":"Tor","Utah Jazz":"UTAH","Washington Wizards":"WSH"};
-  const NHL_ESPN = {"Anaheim Ducks":"Ana","Boston Bruins":"Bos","Buffalo Sabres":"Buf","Calgary Flames":"Cgy","Carolina Hurricanes":"Car","Chicago Blackhawks":"Chi","Colorado Avalanche":"Col","Columbus Blue Jackets":"Cbj","Dallas Stars":"Dal","Detroit Red Wings":"Det","Edmonton Oilers":"Edm","Florida Panthers":"Fla","Los Angeles Kings":"LA","Minnesota Wild":"Min","Montreal Canadiens":"Mtl","Nashville Predators":"Nsh","New Jersey Devils":"NJ","New York Islanders":"NYI","New York Rangers":"NYR","Ottawa Senators":"Ott","Philadelphia Flyers":"Phi","Pittsburgh Penguins":"Pit","San Jose Sharks":"SJ","Seattle Kraken":"Sea","St. Louis Blues":"StL","Tampa Bay Lightning":"TB","Toronto Maple Leafs":"Tor","Utah Hockey Club":"Utah","Vancouver Canucks":"Van","Vegas Golden Knights":"VGK","Washington Capitals":"Wsh","Winnipeg Jets":"Wpg"};
+  // ESPN URL slugs - from espn.com/nba/players and espn.com/nhl/teams
+  const NBA_ESPN = {"Atlanta Hawks":"atl","Boston Celtics":"bos","Brooklyn Nets":"bkn","Charlotte Hornets":"cha","Chicago Bulls":"chi","Cleveland Cavaliers":"cle","Dallas Mavericks":"dal","Denver Nuggets":"den","Detroit Pistons":"det","Golden State Warriors":"gs","Houston Rockets":"hou","Indiana Pacers":"ind","LA Clippers":"lac","Los Angeles Lakers":"lal","Memphis Grizzlies":"mem","Miami Heat":"mia","Milwaukee Bucks":"mil","Minnesota Timberwolves":"min","New Orleans Pelicans":"no","New York Knicks":"ny","Oklahoma City Thunder":"okc","Orlando Magic":"orl","Philadelphia 76ers":"phi","Phoenix Suns":"phx","Portland Trail Blazers":"por","Sacramento Kings":"sac","San Antonio Spurs":"sa","Toronto Raptors":"tor","Utah Jazz":"utah","Washington Wizards":"wsh"};
+  const NHL_ESPN = {"Anaheim Ducks":"ana","Boston Bruins":"bos","Buffalo Sabres":"buf","Calgary Flames":"cgy","Carolina Hurricanes":"car","Chicago Blackhawks":"chi","Colorado Avalanche":"col","Columbus Blue Jackets":"cbj","Dallas Stars":"dal","Detroit Red Wings":"det","Edmonton Oilers":"edm","Florida Panthers":"fla","Los Angeles Kings":"la","Minnesota Wild":"min","Montreal Canadiens":"mtl","Nashville Predators":"nsh","New Jersey Devils":"nj","New York Islanders":"nyi","New York Rangers":"nyr","Ottawa Senators":"ott","Philadelphia Flyers":"phi","Pittsburgh Penguins":"pit","San Jose Sharks":"sj","Seattle Kraken":"sea","St. Louis Blues":"stl","Tampa Bay Lightning":"tb","Toronto Maple Leafs":"tor","Utah Mammoth":"utah","Vancouver Canucks":"van","Vegas Golden Knights":"vgk","Washington Capitals":"wsh","Winnipeg Jets":"wpg"};
 
   try {
-    // Step 1: Scrape ESPN roster page
     const abbr = sport === "nhl" ? NHL_ESPN[team] : NBA_ESPN[team];
     if (!abbr) return res.status(400).json({ error: "Unknown team: " + team });
 
+    // Correct ESPN roster URL format
     const espnUrl = sport === "nhl"
-      ? "https://www.espn.com/nhl/teams/roster?team=" + abbr
-      : "https://www.espn.com/nba/teams/roster?team=" + abbr;
+      ? "https://www.espn.com/nhl/team/roster/_/name/" + abbr
+      : "https://www.espn.com/nba/team/roster/_/name/" + abbr;
 
     const rosterResp = await fetch(espnUrl, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36" }
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36", "Accept": "text/html,application/xhtml+xml" }
     });
     const html = await rosterResp.text();
 
-    // Extract player names from HTML - ESPN roster table
-    const playerMatches = [...html.matchAll(/\/nba\/player\/_\/id\/\d+\/([^"]+)"/g)];
-    const nhlMatches = [...html.matchAll(/\/nhl\/player\/_\/id\/\d+\/([^"]+)"/g)];
-    const matches = sport === "nhl" ? nhlMatches : playerMatches;
-    const slugs = [...new Set(matches.map(m => m[1]))];
-    const names = slugs.map(s => s.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase())).slice(0, 20);
+    // Extract player names from ESPN player links
+    const sport_path = sport === "nhl" ? "nhl" : "nba";
+    const re = new RegExp('/' + sport_path + '/player/_/id/\\d+/([a-z0-9-]+)"', 'g');
+    const slugs = [...new Set([...html.matchAll(re)].map(m => m[1]))];
+    const names = slugs
+      .filter(s => s.length > 3 && !s.includes("team") && !s.includes("roster"))
+      .map(s => s.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" "))
+      .slice(0, 25);
 
-    // Step 2: Get team stats + player ppg via Haiku search
+    // Get team stats via Haiku search
     const search = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
@@ -40,17 +43,19 @@ export default async function handler(req, res) {
         max_tokens: 800,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         messages: [{ role: "user", content: sport === "nhl"
-          ? team + " NHL 2025-26 season stats wins losses goals per game power play percentage"
-          : team + " NBA 2025-26 season stats wins losses points per game each player ppg averages"
+          ? team + " NHL 2025-26 stats: wins losses OTL goals-per-game goals-against power-play% penalty-kill% player points goals assists"
+          : team + " NBA 2025-26 stats: wins losses points-per-game opponent-ppg each player individual ppg averages"
         }]
       })
     });
     const sd = await search.json();
     const searchText = (sd.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 2000);
 
-    // Step 3: Sonnet formats with ESPN names + search stats
+    // Sonnet formats using ESPN names + search stats
     const nbaSchema = '{"wins":0,"losses":0,"ppg":112,"opp":110,"efg_pct":0.52,"tov_rate":13,"oreb_pct":0.25,"ftr":0.22,"opp_efg_pct":0.52,"opp_tov_rate":13,"opp_oreb_pct":0.25,"opp_ftr":0.22,"last10":"5-5","last10_ppg":112,"last10_opp":110,"roster":[{"name":"Player Name","ppg":20.0,"per":17.0,"role":"STAR","status":"PLAYING"}]}';
     const nhlSchema = '{"wins":0,"losses":0,"otl":0,"points":0,"gf_pg":3.0,"ga_pg":2.8,"shots_pg":30,"shots_against_pg":28,"pp_pct":22,"pk_pct":80,"last10_gf":3.0,"last10_ga":2.8,"goalie":{"name":"Starter","save_pct":0.910,"gaa":2.80,"status":"PLAYING"},"roster":[{"name":"Player","goals":20,"assists":30,"points":50,"plus_minus":5,"position":"LW","role":"STAR","status":"PLAYING"}]}';
+
+    const playerList = names.length > 0 ? "ESPN roster players: " + names.join(", ") : "Use your knowledge of the current " + team + " roster.";
 
     const fmt = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -59,7 +64,7 @@ export default async function handler(req, res) {
         model: "claude-sonnet-4-20250514",
         max_tokens: 2000,
         system: "Output only a single raw JSON object. No markdown, no explanation, no code fences.",
-        messages: [{ role: "user", content: "Build JSON for the " + team + " " + sport.toUpperCase() + ".\n\nCurrent roster players (from ESPN):\n" + names.join(", ") + "\n\nStats data:\n" + searchText + "\n\nSchema:\n" + (sport === "nhl" ? nhlSchema : nbaSchema) + "\n\nUse EXACTLY the player names listed above. Fill in stats from the data. " + (sport === "nhl" ? "role=STAR if points>40, KEY if points>20, else ROLE." : "role=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.85.") + " All players status=PLAYING." }]
+        messages: [{ role: "user", content: playerList + "\n\nStats:\n" + searchText + "\n\nBuild JSON for " + team + " " + sport.toUpperCase() + " using schema:\n" + (sport === "nhl" ? nhlSchema : nbaSchema) + "\n\nUse the player names above. Fill stats from data. " + (sport === "nhl" ? "role=STAR if points>40, KEY if points>20, else ROLE. Include position." : "role=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.85.") }]
       })
     });
     const fd = await fmt.json();
@@ -70,7 +75,7 @@ export default async function handler(req, res) {
     try { parsed = JSON.parse(raw); } catch(_) {}
     if (!parsed) { try { parsed = JSON.parse(raw.replace(/^```json\s*/i,"").replace(/\s*```$/,"")); } catch(_) {} }
     if (!parsed) { try { const i=raw.indexOf("{"),j=raw.lastIndexOf("}"); if(i>=0&&j>i) parsed=JSON.parse(raw.slice(i,j+1)); } catch(_) {} }
-    if (!parsed) return res.status(500).json({ error: "Parse failed", raw: raw.slice(0,300), espnNames: names });
+    if (!parsed) return res.status(500).json({ error: "Parse failed", espnNames: names, raw: raw.slice(0,200) });
 
     if (sport === "nhl") {
       parsed.wins=parsed.wins??30; parsed.losses=parsed.losses??25; parsed.otl=parsed.otl??5;

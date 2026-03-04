@@ -51,6 +51,41 @@ const TEAM_IDS = {
   "Utah Jazz":29,"Washington Wizards":30
 };
 
+
+// ESPN team slug mapping for injury data
+const ESPN_SLUGS = {
+  "Atlanta Hawks":"atl","Boston Celtics":"bos","Brooklyn Nets":"bkn","Charlotte Hornets":"cha",
+  "Chicago Bulls":"chi","Cleveland Cavaliers":"cle","Dallas Mavericks":"dal","Denver Nuggets":"den",
+  "Detroit Pistons":"det","Golden State Warriors":"gsw","Houston Rockets":"hou","Indiana Pacers":"ind",
+  "LA Clippers":"lac","Los Angeles Lakers":"lal","Memphis Grizzlies":"mem","Miami Heat":"mia",
+  "Milwaukee Bucks":"mil","Minnesota Timberwolves":"min","New Orleans Pelicans":"no","New York Knicks":"ny",
+  "Oklahoma City Thunder":"okc","Orlando Magic":"orl","Philadelphia 76ers":"phi","Phoenix Suns":"phx",
+  "Portland Trail Blazers":"por","Sacramento Kings":"sac","San Antonio Spurs":"sa","Toronto Raptors":"tor",
+  "Utah Jazz":"utah","Washington Wizards":"wsh"
+};
+
+async function fetchInjuries(teamName, topPlayers) {
+  try {
+    const slug = ESPN_SLUGS[teamName];
+    if (!slug) return [];
+    const resp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${slug}/injuries`);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return (data.injuries || []).map(inj => {
+      const playerName = inj.athlete?.displayName || inj.athlete?.fullName || "Unknown";
+      const matched = topPlayers.find(p => p.name.toLowerCase().includes(playerName.split(" ").at(-1).toLowerCase()));
+      return {
+        name: playerName,
+        status: inj.status === "Out" ? "OUT" : inj.status === "Doubtful" ? "DOUBTFUL" : "QUESTIONABLE",
+        reason: inj.type?.description || inj.longComment || "Injury",
+        ppg: matched?.ppg || 8.0,
+        per: matched?.per || 12.0,
+        role: matched?.role || "ROLE"
+      };
+    }).filter(p => p.name !== "Unknown");
+  } catch(e) { return []; }
+}
+
 // Fetch real NBA stats from balldontlie free API
 async function fetchTeamAnalysis(teamName) {
   const teamId = TEAM_IDS[teamName];
@@ -134,7 +169,7 @@ async function fetchTeamAnalysis(teamName) {
       last10_ppg: parseFloat((last10Pts / Math.max(last10Games, 1)).toFixed(1)),
       last10_opp: parseFloat((last10Opp / Math.max(last10Games, 1)).toFixed(1)),
       top_players: players,
-      injuries: []
+      injuries: await fetchInjuries(teamName, players)
     };
   } catch (err) {
     // Fallback to Claude API for team info if balldontlie fails

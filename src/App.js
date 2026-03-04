@@ -52,37 +52,52 @@ const TEAM_IDS = {
 };
 
 
-// ESPN team slug mapping for injury data
-const ESPN_SLUGS = {
-  "Atlanta Hawks":"atl","Boston Celtics":"bos","Brooklyn Nets":"bkn","Charlotte Hornets":"cha",
-  "Chicago Bulls":"chi","Cleveland Cavaliers":"cle","Dallas Mavericks":"dal","Denver Nuggets":"den",
-  "Detroit Pistons":"det","Golden State Warriors":"gsw","Houston Rockets":"hou","Indiana Pacers":"ind",
-  "LA Clippers":"lac","Los Angeles Lakers":"lal","Memphis Grizzlies":"mem","Miami Heat":"mia",
-  "Milwaukee Bucks":"mil","Minnesota Timberwolves":"min","New Orleans Pelicans":"no","New York Knicks":"ny",
-  "Oklahoma City Thunder":"okc","Orlando Magic":"orl","Philadelphia 76ers":"phi","Phoenix Suns":"phx",
-  "Portland Trail Blazers":"por","Sacramento Kings":"sac","San Antonio Spurs":"sa","Toronto Raptors":"tor",
-  "Utah Jazz":"utah","Washington Wizards":"wsh"
+// ESPN numeric team ID mapping (sports.core.api.espn.com uses numeric IDs)
+const ESPN_IDS = {
+  "Atlanta Hawks":"1","Boston Celtics":"2","Brooklyn Nets":"17","Charlotte Hornets":"30",
+  "Chicago Bulls":"4","Cleveland Cavaliers":"5","Dallas Mavericks":"6","Denver Nuggets":"7",
+  "Detroit Pistons":"8","Golden State Warriors":"9","Houston Rockets":"10","Indiana Pacers":"11",
+  "LA Clippers":"12","Los Angeles Lakers":"13","Memphis Grizzlies":"29","Miami Heat":"14",
+  "Milwaukee Bucks":"15","Minnesota Timberwolves":"16","New Orleans Pelicans":"3","New York Knicks":"18",
+  "Oklahoma City Thunder":"25","Orlando Magic":"19","Philadelphia 76ers":"20","Phoenix Suns":"21",
+  "Portland Trail Blazers":"22","Sacramento Kings":"23","San Antonio Spurs":"24","Toronto Raptors":"28",
+  "Utah Jazz":"26","Washington Wizards":"27"
 };
 
 async function fetchInjuries(teamName, topPlayers) {
   try {
-    const slug = ESPN_SLUGS[teamName];
-    if (!slug) return [];
-    const resp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${slug}/injuries`);
+    const id = ESPN_IDS[teamName];
+    if (!id) return [];
+    const resp = await fetch(
+      `https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/teams/${id}/injuries?limit=25`
+    );
     if (!resp.ok) return [];
     const data = await resp.json();
-    return (data.injuries || []).map(inj => {
-      const playerName = inj.athlete?.displayName || inj.athlete?.fullName || "Unknown";
-      const matched = topPlayers.find(p => p.name.toLowerCase().includes(playerName.split(" ").at(-1).toLowerCase()));
-      return {
-        name: playerName,
-        status: inj.status === "Out" ? "OUT" : inj.status === "Doubtful" ? "DOUBTFUL" : "QUESTIONABLE",
-        reason: inj.type?.description || inj.longComment || "Injury",
-        ppg: matched?.ppg || 8.0,
-        per: matched?.per || 12.0,
-        role: matched?.role || "ROLE"
-      };
-    }).filter(p => p.name !== "Unknown");
+    const items = data.items || [];
+    const injuries = [];
+    for (const item of items.slice(0, 8)) {
+      try {
+        // Each item is a reference URL — fetch it to get details
+        const detailResp = await fetch(item.$ref);
+        if (!detailResp.ok) continue;
+        const detail = await detailResp.json();
+        const playerName = detail.athlete?.displayName || detail.athlete?.shortName || "";
+        if (!playerName) continue;
+        const rawStatus = (detail.status || "").toLowerCase();
+        const status = rawStatus.includes("out") ? "OUT" : rawStatus.includes("doubt") ? "DOUBTFUL" : "QUESTIONABLE";
+        const reason = detail.shortComment || detail.longComment || detail.type?.description || "Injury";
+        const matched = topPlayers.find(p => p.name.toLowerCase().includes(playerName.split(" ").at(-1).toLowerCase()));
+        injuries.push({
+          name: playerName,
+          status,
+          reason: reason.replace(/^Injury\/Illness - /i,""),
+          ppg: matched?.ppg || 8.0,
+          per: matched?.per || 12.0,
+          role: matched?.role || "ROLE"
+        });
+      } catch(_) {}
+    }
+    return injuries;
   } catch(e) { return []; }
 }
 

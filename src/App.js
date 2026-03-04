@@ -505,7 +505,7 @@ function NHLPage() {
 
     {dataLoaded&&homeData&&awayData&&<div className="fade-in" style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:14}}>
       <SectionHeader label="Lineup & Injury Report" accent={C.ice} right={<div style={{display:"flex",gap:6}}>
-        {(outCount(awayData)>0||goalieOut(awayData))?<Pill label={`${NHL_ABBR[awayTeam]} ${outCount(awayData)++(goalieOut(awayData)?1:0)} OUT`} color="#E05252"/>:<Pill label={`${NHL_ABBR[awayTeam]} FULL`} color={C.ice}/>}
+        {(outCount(awayData)>0||goalieOut(awayData))?<Pill label={`${NHL_ABBR[awayTeam]} ${outCount(awayData)+(goalieOut(awayData)?1:0)} OUT`} color="#E05252"/>:<Pill label={`${NHL_ABBR[awayTeam]} FULL`} color={C.ice}/>}
         {(outCount(homeData)>0||goalieOut(homeData))?<Pill label={`${NHL_ABBR[homeTeam]} ${outCount(homeData)+(goalieOut(homeData)?1:0)} OUT`} color="#E05252"/>:<Pill label={`${NHL_ABBR[homeTeam]} FULL`} color={C.ice}/>}
       </div>}/>
       <div style={{padding:14}}>

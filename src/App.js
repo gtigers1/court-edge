@@ -139,8 +139,8 @@ function WinBar({ homeProb, homeAbbr, awayAbbr }) {
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-        <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 13, fontWeight: 700, color: homeProb > 0.5 ? C.teal : C.muted }}>{homeAbbr} {(homeProb*100).toFixed(1)}%</span>
-        <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 13, fontWeight: 700, color: ap > 0.5 ? C.teal : C.muted }}>{(ap*100).toFixed(1)}% {awayAbbr}</span>
+        <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 13, fontWeight: 700, color: ap > 0.5 ? C.teal : C.muted }}>{homeAbbr} {(ap*100).toFixed(1)}%</span>
+        <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 13, fontWeight: 700, color: homeProb > 0.5 ? C.teal : C.muted }}>{(homeProb*100).toFixed(1)}% {awayAbbr}</span>
       </div>
       <div style={{ height: 6, borderRadius: 3, background: C.border, overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${homeProb*100}%`, background: `linear-gradient(90deg, ${C.tealD}, ${C.teal})`, borderRadius: 3, transition: "width 0.6s ease" }}/>
@@ -224,19 +224,19 @@ function ModelCard({ icon, name, desc, homeTeam, awayTeam, homeProb, detail }) {
       {/* Teams row */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
-          <Badge abbr={ABBR[homeTeam]} size={28}/>
+          <Badge abbr={ABBR[awayTeam]} size={28}/>
           <div>
-            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 900, fontSize: 20, color: hFav ? C.teal : C.white, lineHeight: 1 }}>{(homeProb*100).toFixed(0)}%</div>
-            <div style={{ fontSize: 9, color: C.muted }}>{homeTeam.split(" ").at(-1)}</div>
+            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 900, fontSize: 20, color: !hFav ? C.teal : C.white, lineHeight: 1 }}>{(ap*100).toFixed(0)}%</div>
+            <div style={{ fontSize: 9, color: C.muted }}>{awayTeam.split(" ").at(-1)}</div>
           </div>
         </div>
         <div style={{ width: 1, height: 32, background: C.border }}/>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, justifyContent: "flex-end" }}>
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 900, fontSize: 20, color: !hFav ? C.teal : C.white, lineHeight: 1 }}>{(ap*100).toFixed(0)}%</div>
-            <div style={{ fontSize: 9, color: C.muted }}>{awayTeam.split(" ").at(-1)}</div>
+            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 900, fontSize: 20, color: hFav ? C.teal : C.white, lineHeight: 1 }}>{(homeProb*100).toFixed(0)}%</div>
+            <div style={{ fontSize: 9, color: C.muted }}>{homeTeam.split(" ").at(-1)}</div>
           </div>
-          <Badge abbr={ABBR[awayTeam]} size={28}/>
+          <Badge abbr={ABBR[homeTeam]} size={28}/>
         </div>
       </div>
       {/* Bar */}
@@ -350,10 +350,10 @@ export default function App() {
           <div style={{ padding:16 }}>
             {/* Team pickers */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:12, alignItems:"center", marginBottom:14 }}>
-              {/* Home */}
+              {/* Away */}
               <div>
-                <div style={{ fontSize:10, color:C.copper, fontFamily:"'Barlow Condensed'", fontWeight:700, letterSpacing:1.5, textTransform:"uppercase", marginBottom:6 }}>🏠 Home Team</div>
-                <select style={sel} value={homeTeam} onChange={e=>{setHomeTeam(e.target.value);setHomeData(null);setResults(null);setDataLoaded(false);}}>
+                <div style={{ fontSize:10, color:C.teal, fontFamily:"'Barlow Condensed'", fontWeight:700, letterSpacing:1.5, textTransform:"uppercase", marginBottom:6 }}>✈️ Away Team</div>
+                <select style={sel} value={awayTeam} onChange={e=>{setAwayTeam(e.target.value);setAwayData(null);setResults(null);setDataLoaded(false);}}>
                   <option value="">Select team...</option>
                   {NBA_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
                 </select>
@@ -362,10 +362,10 @@ export default function App() {
               <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, paddingTop:20 }}>
                 <div style={{ width:36, height:36, borderRadius:"50%", background:C.dark, border:`2px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:12, color:C.muted }}>VS</div>
               </div>
-              {/* Away */}
+              {/* Home */}
               <div>
-                <div style={{ fontSize:10, color:C.teal, fontFamily:"'Barlow Condensed'", fontWeight:700, letterSpacing:1.5, textTransform:"uppercase", marginBottom:6 }}>✈️ Away Team</div>
-                <select style={sel} value={awayTeam} onChange={e=>{setAwayTeam(e.target.value);setAwayData(null);setResults(null);setDataLoaded(false);}}>
+                <div style={{ fontSize:10, color:C.copper, fontFamily:"'Barlow Condensed'", fontWeight:700, letterSpacing:1.5, textTransform:"uppercase", marginBottom:6 }}>🏠 Home Team</div>
+                <select style={sel} value={homeTeam} onChange={e=>{setHomeTeam(e.target.value);setHomeData(null);setResults(null);setDataLoaded(false);}}>
                   <option value="">Select team...</option>
                   {NBA_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
                 </select>
@@ -375,13 +375,13 @@ export default function App() {
             {/* Moneyline inputs */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 36px 1fr", gap:12, marginBottom:16 }}>
               <div>
-                <div style={{ fontSize:10, color:C.muted, letterSpacing:1, marginBottom:5, textTransform:"uppercase" }}>Home Moneyline</div>
-                <input style={inp} placeholder="-150" value={homeOdds} onChange={e=>setHomeOdds(e.target.value)}/>
+                <div style={{ fontSize:10, color:C.muted, letterSpacing:1, marginBottom:5, textTransform:"uppercase" }}>Away Moneyline</div>
+                <input style={inp} placeholder="+130" value={awayOdds} onChange={e=>setAwayOdds(e.target.value)}/>
               </div>
               <div/>
               <div>
-                <div style={{ fontSize:10, color:C.muted, letterSpacing:1, marginBottom:5, textTransform:"uppercase" }}>Away Moneyline</div>
-                <input style={inp} placeholder="+130" value={awayOdds} onChange={e=>setAwayOdds(e.target.value)}/>
+                <div style={{ fontSize:10, color:C.muted, letterSpacing:1, marginBottom:5, textTransform:"uppercase" }}>Home Moneyline</div>
+                <input style={inp} placeholder="-150" value={homeOdds} onChange={e=>setHomeOdds(e.target.value)}/>
               </div>
             </div>
 
@@ -428,8 +428,8 @@ export default function App() {
             </div>
             <div style={{ padding:14 }}>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-                <RosterPanel teamName={homeTeam} teamData={homeData} onCyclePlayer={n=>cyclePlayer("home",n)}/>
                 <RosterPanel teamName={awayTeam} teamData={awayData} onCyclePlayer={n=>cyclePlayer("away",n)}/>
+                <RosterPanel teamName={homeTeam} teamData={homeData} onCyclePlayer={n=>cyclePlayer("home",n)}/>
               </div>
               <button className="rerun-btn" onClick={handleRerun} style={{
                 marginTop:12, width:"100%", padding:"11px 0",
@@ -481,14 +481,14 @@ export default function App() {
 
                   {/* Main matchup display */}
                   <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:16, alignItems:"center", marginBottom:16 }}>
-                    {/* Home */}
+                    {/* Away */}
                     <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
-                      <Badge abbr={ABBR[homeTeam]} size={52}/>
+                      <Badge abbr={ABBR[awayTeam]} size={52}/>
                       <div style={{ textAlign:"center" }}>
-                        <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:42, lineHeight:1, color: cH>0.55?C.teal:cH>0.45?C.copper:C.white }}>{(cH*100).toFixed(1)}%</div>
-                        <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{homeTeam}</div>
+                        <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:42, lineHeight:1, color: cA>0.55?C.teal:cA>0.45?C.copper:C.white }}>{(cA*100).toFixed(1)}%</div>
+                        <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{awayTeam}</div>
                       </div>
-                      <OddsPill prob={cH}/>
+                      <OddsPill prob={cA}/>
                     </div>
 
                     {/* Center */}
@@ -502,19 +502,19 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* Away */}
+                    {/* Home */}
                     <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
-                      <Badge abbr={ABBR[awayTeam]} size={52}/>
+                      <Badge abbr={ABBR[homeTeam]} size={52}/>
                       <div style={{ textAlign:"center" }}>
-                        <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:42, lineHeight:1, color: cA>0.55?C.teal:cA>0.45?C.copper:C.white }}>{(cA*100).toFixed(1)}%</div>
-                        <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{awayTeam}</div>
+                        <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:42, lineHeight:1, color: cH>0.55?C.teal:cH>0.45?C.copper:C.white }}>{(cH*100).toFixed(1)}%</div>
+                        <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{homeTeam}</div>
                       </div>
-                      <OddsPill prob={cA}/>
+                      <OddsPill prob={cH}/>
                     </div>
                   </div>
 
                   {/* Win probability bar */}
-                  <WinBar homeProb={cH} homeAbbr={ABBR[homeTeam]} awayAbbr={ABBR[awayTeam]}/>
+                  <WinBar homeProb={cH} homeAbbr={ABBR[awayTeam]} awayAbbr={ABBR[homeTeam]}/>
 
                   {/* Edge chips */}
                   {(hE||aE) && (
@@ -547,7 +547,7 @@ export default function App() {
                       return (
                         <div key={m.l} style={{ textAlign:"center", background:C.black, borderRadius:8, padding:"10px 6px", border:`1px solid ${fav?C.teal+"44":C.border}` }}>
                           <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:22, color:fav?C.teal:C.white }}>{(m.p*100).toFixed(0)}%</div>
-                          <div style={{ fontSize:10, color:fav?C.teal:C.muted, fontWeight:700, marginBottom:2 }}>{fav?ABBR[homeTeam]:ABBR[awayTeam]}</div>
+                          <div style={{ fontSize:10, color:fav?C.teal:C.muted, fontWeight:700, marginBottom:2 }}>{fav?ABBR[awayTeam]:ABBR[homeTeam]}</div>
                           <div style={{ fontSize:9, color:C.dim, textTransform:"uppercase", letterSpacing:0.5 }}>{m.l}</div>
                         </div>
                       );

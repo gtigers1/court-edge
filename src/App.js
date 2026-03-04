@@ -68,36 +68,23 @@ async function fetchInjuries(teamName, topPlayers) {
   try {
     const id = ESPN_IDS[teamName];
     if (!id) return [];
-    const resp = await fetch(
-      `https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/teams/${id}/injuries?limit=25`
-    );
+    // Use our Vercel proxy to avoid CORS issues with ESPN API
+    const resp = await fetch(`/api/injuries?teamId=${id}`);
     if (!resp.ok) return [];
     const data = await resp.json();
-    const items = data.items || [];
-    const injuries = [];
-    for (const item of items.slice(0, 8)) {
-      try {
-        // Each item is a reference URL — fetch it to get details
-        const detailResp = await fetch(item.$ref);
-        if (!detailResp.ok) continue;
-        const detail = await detailResp.json();
-        const playerName = detail.athlete?.displayName || detail.athlete?.shortName || "";
-        if (!playerName) continue;
-        const rawStatus = (detail.status || "").toLowerCase();
-        const status = rawStatus.includes("out") ? "OUT" : rawStatus.includes("doubt") ? "DOUBTFUL" : "QUESTIONABLE";
-        const reason = detail.shortComment || detail.longComment || detail.type?.description || "Injury";
-        const matched = topPlayers.find(p => p.name.toLowerCase().includes(playerName.split(" ").at(-1).toLowerCase()));
-        injuries.push({
-          name: playerName,
-          status,
-          reason: reason.replace(/^Injury\/Illness - /i,""),
-          ppg: matched?.ppg || 8.0,
-          per: matched?.per || 12.0,
-          role: matched?.role || "ROLE"
-        });
-      } catch(_) {}
-    }
-    return injuries;
+    return (data.injuries || []).map(inj => {
+      const matched = topPlayers.find(p =>
+        p.name.toLowerCase().includes(inj.name.split(" ").at(-1).toLowerCase())
+      );
+      return {
+        name: inj.name,
+        status: inj.status,
+        reason: inj.reason,
+        ppg: matched?.ppg || 8.0,
+        per: matched?.per || 12.0,
+        role: matched?.role || "ROLE"
+      };
+    });
   } catch(e) { return []; }
 }
 

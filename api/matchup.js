@@ -7,30 +7,27 @@ export default async function handler(req, res) {
   const { homeTeam, awayTeam } = req.body || {};
   if (!homeTeam || !awayTeam) return res.status(400).json({ error: "homeTeam and awayTeam required" });
   try {
-    // Step 1: Search for raw stats
     const search = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 1500,
+        max_tokens: 2000,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{ role: "user", content: "Search: current 2025-26 NBA season stats wins losses ppg opp for " + awayTeam + " and " + homeTeam + " plus their top 10 players ppg" }]
+        messages: [{ role: "user", content: "Search for: 1) " + awayTeam + " 2025-26 NBA roster stats all players ppg 2) " + homeTeam + " 2025-26 NBA roster stats all players ppg 3) both teams wins losses record. List every player and their points per game." }]
       })
     });
     const sd = await search.json();
     if (!search.ok) return res.status(502).json({ error: sd.error?.message || "Search error" });
     const searchText = (sd.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-
-    // Step 2: Format into JSON with a tiny prompt
     const format = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 1500,
-        system: "Output only raw JSON, no markdown.",
-        messages: [{ role: "user", content: "Format this NBA data into JSON. Home=" + homeTeam + " Away=" + awayTeam + ".\n\nData:\n" + searchText.slice(0, 2000) + "\n\nReturn: {\"home\":{\"wins\":0,\"losses\":0,\"ppg\":0,\"opp\":0,\"efg_pct\":0.52,\"tov_rate\":13,\"oreb_pct\":0.25,\"ftr\":0.22,\"opp_efg_pct\":0.52,\"opp_tov_rate\":13,\"opp_oreb_pct\":0.25,\"opp_ftr\":0.22,\"last10\":\"5-5\",\"last10_ppg\":112,\"last10_opp\":110,\"roster\":[{\"name\":\"Player\",\"ppg\":20,\"per\":18,\"role\":\"STAR\",\"status\":\"PLAYING\"}]},\"away\":{same fields}} Use real values from data. Include all players found. role=STAR if ppg>20, KEY if ppg>11, else ROLE." }]
+        max_tokens: 2000,
+        system: "Output only a raw JSON object. No markdown, no explanation.",
+        messages: [{ role: "user", content: "Using this data, build JSON for home=" + homeTeam + " away=" + awayTeam + ".\nData: " + searchText.slice(0, 3000) + "\n\nReturn this exact structure:\n{\"home\":{\"wins\":0,\"losses\":0,\"ppg\":0,\"opp\":0,\"efg_pct\":0.52,\"tov_rate\":13,\"oreb_pct\":0.25,\"ftr\":0.22,\"opp_efg_pct\":0.52,\"opp_tov_rate\":13,\"opp_oreb_pct\":0.25,\"opp_ftr\":0.22,\"last10\":\"5-5\",\"last10_ppg\":112,\"last10_opp\":110,\"roster\":[{\"name\":\"Full Name\",\"ppg\":20.0,\"per\":18.0,\"role\":\"STAR\",\"status\":\"PLAYING\"}]},\"away\":{same structure}}\nIMPORTANT: Include EVERY player found for each team. role=STAR if ppg>20, KEY if ppg>11, else ROLE. Estimate per=ppg*0.85 if unknown." }]
       })
     });
     const fd = await format.json();

@@ -1,4 +1,4 @@
-// v4-clean
+// v5-clean
 import { useState } from "react";
 
 function oddsToImplied(o){if(!o||o==="-"||o==="+")return null;const n=parseInt(o);if(isNaN(n)||n===0)return null;return n>0?100/(n+100):Math.abs(n)/(Math.abs(n)+100);}
@@ -42,7 +42,7 @@ function WinBar({awayProb,awayAbbr,homeAbbr,accent}){const ac=accent||C.teal;ret
 function RosterPanel({teamName,abbr,teamData,onCycle,sport,accent}){
   if(!teamData)return null;
   const ac=accent||C.teal;
-  const subtitle=sport==="nhl"?`${teamData.wins}W-${teamData.losses}L-${teamData.otl}OTL Â· ${teamData.gf_pg} GF/G Â· ${teamData.ga_pg} GA/G`:`${teamData.wins}W-${teamData.losses}L Â· ${teamData.ppg} PPG Â· ${teamData.opp} OPP`;
+  const subtitle=sport==="nhl"?`${teamData.wins}W-${teamData.losses}L-${teamData.otl}OTL - ${teamData.gf_pg} GF/G - ${teamData.ga_pg} GA/G`:`${teamData.wins}W-${teamData.losses}L - ${teamData.ppg} PPG - ${teamData.opp} OPP`;
   return <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
     <div style={{padding:"10px 14px",background:C.dark,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
       <Badge abbr={abbr} size={36} accent={ac}/>
@@ -50,7 +50,7 @@ function RosterPanel({teamName,abbr,teamData,onCycle,sport,accent}){
     </div>
     {sport==="nhl"&&teamData.goalie&&<div style={{padding:"8px 14px",background:"#0f0f14",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
       <div style={{fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:800,color:C.ice,letterSpacing:1,width:20,textAlign:"center"}}>G</div>
-      <div style={{flex:1}}><div style={{fontFamily:"'Barlow'",fontWeight:600,fontSize:12,color:C.ice}}>{teamData.goalie.name} <span style={{color:C.muted,fontWeight:400}}>â€” Expected Starter</span></div><div style={{fontSize:10,color:C.muted}}>SV% {teamData.goalie.save_pct?.toFixed(3)} Â· GAA {teamData.goalie.gaa?.toFixed(2)}</div></div>
+      <div style={{flex:1}}><div style={{fontFamily:"'Barlow'",fontWeight:600,fontSize:12,color:C.ice}}>{teamData.goalie.name} <span style={{color:C.muted,fontWeight:400}}>â€” Expected Starter</span></div><div style={{fontSize:10,color:C.muted}}>SV% {teamData.goalie.save_pct?.toFixed(3)} - GAA {teamData.goalie.gaa?.toFixed(2)}</div></div>
       <button className="status-btn" onClick={()=>onCycle("__goalie__")} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:`1.5px solid ${STATUS_COLORS[teamData.goalie.status||"PLAYING"]}`,background:STATUS_COLORS[teamData.goalie.status||"PLAYING"]+"18",color:STATUS_COLORS[teamData.goalie.status||"PLAYING"],fontFamily:"'Barlow Condensed'",letterSpacing:.8,minWidth:100,textAlign:"center"}}>{teamData.goalie.status||"PLAYING"}</button>
     </div>}
     <div style={{padding:"4px 0",maxHeight:340,overflowY:"auto"}}>
@@ -59,7 +59,7 @@ function RosterPanel({teamName,abbr,teamData,onCycle,sport,accent}){
         const sub=sport==="nhl"?`${p.goals}G ${p.assists}A ${p.points}PTS  ${p.plus_minus>=0?"+":""}${p.plus_minus}`:`${p.ppg} PPG`;
         return <div key={p.name} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 14px",borderBottom:`1px solid ${C.border}`}}>
           {sport==="nhl"&&<span style={{fontSize:10,color:C.dim,fontFamily:"'Barlow Condensed'",fontWeight:700,width:20,textAlign:"center"}}>{p.position}</span>}
-          <div style={{flex:1,minWidth:0}}><div style={{fontFamily:"'Barlow'",fontWeight:600,fontSize:13,color:C.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div><div style={{fontSize:10,color:C.muted,marginTop:1}}>{sub} Â· <span style={{color:p.role==="STAR"?C.copper:p.role==="KEY"?ac:C.muted}}>{p.role}</span></div></div>
+          <div style={{flex:1,minWidth:0}}><div style={{fontFamily:"'Barlow'",fontWeight:600,fontSize:13,color:C.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div><div style={{fontSize:10,color:C.muted,marginTop:1}}>{sub} - <span style={{color:p.role==="STAR"?C.copper:p.role==="KEY"?ac:C.muted}}>{p.role}</span></div></div>
           <button className="status-btn" onClick={()=>onCycle(p.name)} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:`1.5px solid ${sc}`,background:sc+"18",color:sc,fontFamily:"'Barlow Condensed'",letterSpacing:.8,minWidth:100,textAlign:"center"}}>{p.status}</button>
         </div>;
       })}

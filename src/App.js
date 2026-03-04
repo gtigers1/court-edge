@@ -51,7 +51,6 @@ async function fetchMatchup(homeTeam, awayTeam) {
   return data;
 }
 
-// 5 Models
 function modelElo(hd,ad){const hw=hd.wins/Math.max(hd.wins+hd.losses,1),aw=ad.wins/Math.max(ad.wins+ad.losses,1);const hE=1500+400*Math.log10(Math.max(hw,0.01)/Math.max(1-hw,0.01)),aE=1500+400*Math.log10(Math.max(aw,0.01)/Math.max(1-aw,0.01));const h10=(hd.last10_ppg||hd.ppg)-(hd.last10_opp||hd.opp),a10=(ad.last10_ppg||ad.ppg)-(ad.last10_opp||ad.opp);const p=1/(1+Math.pow(10,(aE+a10*3-((hE+h10*3)+100))/400));return{homeProb:Math.min(0.97,Math.max(0.03,p)),hElo:Math.round(hE+h10*3),aElo:Math.round(aE+a10*3)};}
 function modelRaptor(hd,ad){const val=roster=>(roster||[]).reduce((s,p)=>{const st=p.status;return s+(p.per||15)*(st==="PLAYING"?1:st==="OUT"?0:st==="DOUBTFUL"?0.25:0.65);},0);const hV=val(hd.roster),aV=val(ad.roster);return{homeProb:Math.min(0.97,Math.max(0.03,hV/Math.max(hV+aV,1)+0.035)),hVal:hV.toFixed(1),aVal:aV.toFixed(1)};}
 function modelFourFactors(hd,ad){const hit=roster=>(roster||[]).reduce((s,p)=>{if(p.status==="PLAYING")return s;const sw=p.status==="OUT"?1:p.status==="DOUBTFUL"?0.75:0.35;return s+sw*Math.max(p.role==="STAR"?0.08:p.role==="KEY"?0.04:0.015,Math.min((p.ppg||0)*0.004,0.06));},0);const ff=d=>(d.efg_pct||0.52)*0.40+(1-(d.tov_rate||14)/30)*0.25+(d.oreb_pct||0.25)*0.20+Math.min(d.ftr||0.22,0.40)*0.15;const netDiff=(hd.ppg-hd.opp)-(ad.ppg-ad.opp),ffDiff=ff(hd)-ff(ad);const hH=hit(hd.roster),aH=hit(ad.roster);return{homeProb:Math.min(0.97,Math.max(0.03,logistic(netDiff*0.065+ffDiff*4)+0.035-hH+aH)),hFF:ff(hd).toFixed(3),aFF:ff(ad).toFixed(3),hHit:hH,aHit:aH};}
@@ -59,53 +58,195 @@ function modelML(hd,ad){const pen=roster=>(roster||[]).reduce((s,p)=>{if(p.statu
 function modelMonteCarlo(hd,ad,N=10000){const ih=roster=>(roster||[]).reduce((s,p)=>{if(p.status==="PLAYING")return s;return s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?0.65:0.3)*Math.min((p.ppg||0)*0.15,4);},0);const hE=((hd.ppg-ih(hd.roster))+(100-(ad.opp-ih(ad.roster))))/2+1.5,aE=((ad.ppg-ih(ad.roster))+(100-(hd.opp-ih(hd.roster))))/2;let w=0;for(let i=0;i<N;i++){const u1=Math.random(),u2=Math.random();const z1=Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2),z2=Math.sqrt(-2*Math.log(u1))*Math.sin(2*Math.PI*u2);if(hE+z1*11>aE+z2*11)w++;}return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hE.toFixed(1),aExp:aE.toFixed(1)};}
 function modelConsensus(ps){return Math.min(0.97,Math.max(0.03,[0.18,0.22,0.22,0.22,0.16].reduce((s,w,i)=>s+ps[i]*w,0)));}
 
-// UI
-const STATUS_COLORS={"PLAYING":"#00e87a","QUESTIONABLE":"#e8d87a","DOUBTFUL":"#e8b87a","OUT":"#e87a7a"};
-const STATUS_CYCLE=["PLAYING","QUESTIONABLE","DOUBTFUL","OUT"];
+const STATUS_COLORS = { PLAYING:"#2DD4A0", QUESTIONABLE:"#F5A623", DOUBTFUL:"#E07B30", OUT:"#E05252" };
+const STATUS_CYCLE = ["PLAYING","QUESTIONABLE","DOUBTFUL","OUT"];
 
-function TBadge({name,small}){const ab=ABBR[name]||name?.slice(0,3).toUpperCase();return <div style={{width:small?32:48,height:small?32:48,borderRadius:"50%",background:"linear-gradient(135deg,#1a3a5c,#0f2340)",border:"2px solid #c8a84b",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Bebas Neue',cursive",fontSize:small?9:12,color:"#c8a84b",letterSpacing:1,boxShadow:"0 2px 12px rgba(200,168,75,0.25)"}}>{ab}</div>;}
-function Pill({label,color,large}){return <span style={{display:"inline-block",padding:large?"6px 14px":"3px 9px",borderRadius:20,fontSize:large?12:10,fontWeight:700,background:color+"22",border:`1px solid ${color}`,color,letterSpacing:0.5}}>{label}</span>;}
+const C = {
+  black:   "#0A0A0C",
+  dark:    "#111116",
+  card:    "#16161C",
+  border:  "#242430",
+  copper:  "#B87333",
+  copperL: "#D4924A",
+  teal:    "#2DD4A0",
+  tealD:   "#1A9E78",
+  white:   "#F0F0F5",
+  muted:   "#6B6B80",
+  dim:     "#3A3A4A",
+};
 
-function RosterPanel({teamName, teamData, onCyclePlayer}) {
-  if (!teamData) return null;
+const styles = `
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@400;500;600&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: ${C.black}; }
+  select option { background: #1a1a22; color: ${C.white}; }
+  
+  .tab-btn { transition: all 0.15s ease; }
+  .tab-btn:hover { background: ${C.dim} !important; }
+  
+  .odds-pill { transition: all 0.15s ease; cursor: pointer; }
+  .odds-pill:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(45,212,160,0.3); }
+  
+  .status-btn { transition: all 0.15s ease; }
+  .status-btn:hover { transform: scale(1.04); }
+  
+  .fetch-btn { transition: all 0.2s ease; }
+  .fetch-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(184,115,51,0.5); }
+  .fetch-btn:active:not(:disabled) { transform: translateY(0); }
+
+  .rerun-btn { transition: all 0.2s ease; }
+  .rerun-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(45,212,160,0.35); }
+
+  .model-card { transition: all 0.2s ease; }
+  .model-card:hover { transform: translateY(-2px); border-color: ${C.copper} !important; }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+  .pulse { animation: pulse 1.5s ease-in-out infinite; }
+
+  @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+  .fade-in { animation: fadeIn 0.3s ease forwards; }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: ${C.dark}; }
+  ::-webkit-scrollbar-thumb { background: ${C.dim}; border-radius: 2px; }
+`;
+
+function Badge({ abbr, size = 44 }) {
   return (
-    <div style={{marginTop:10,background:"#050c18",border:"1px solid #1a2d4e",borderRadius:8,padding:10}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-        <TBadge name={teamName} small/>
-        <div>
-          <div style={{fontSize:11,fontWeight:700,color:"#c8a84b",fontFamily:"'Bebas Neue',cursive",letterSpacing:1}}>
-            ROSTER — TAP TO SET INJURY STATUS
-          </div>
-          <div style={{fontSize:10,color:"#3a5a8a"}}>
-            {teamData.wins}W–{teamData.losses}L · {teamData.ppg} PPG · {teamData.opp} OPP
-          </div>
-        </div>
+    <div style={{
+      width: size, height: size, borderRadius: 8,
+      background: `linear-gradient(135deg, ${C.dim}, ${C.card})`,
+      border: `1.5px solid ${C.copper}`,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontWeight: 800, fontSize: size * 0.28, color: C.copper,
+      letterSpacing: 0.5, flexShrink: 0,
+    }}>{abbr}</div>
+  );
+}
+
+function StatChip({ label, value, accent }) {
+  return (
+    <div style={{ textAlign: "center", padding: "6px 10px", background: C.black, borderRadius: 6, border: `1px solid ${C.border}` }}>
+      <div style={{ fontFamily: "'Barlow Condensed'", fontSize: 16, fontWeight: 700, color: accent || C.white }}>{value}</div>
+      <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 0.8, marginTop: 1 }}>{label}</div>
+    </div>
+  );
+}
+
+function WinBar({ homeProb, homeAbbr, awayAbbr }) {
+  const ap = 1 - homeProb;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+        <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 13, fontWeight: 700, color: homeProb > 0.5 ? C.teal : C.muted }}>{homeAbbr} {(homeProb*100).toFixed(1)}%</span>
+        <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 13, fontWeight: 700, color: ap > 0.5 ? C.teal : C.muted }}>{(ap*100).toFixed(1)}% {awayAbbr}</span>
       </div>
-      {teamData.roster.map(p => {
-        const sc = STATUS_COLORS[p.status];
-        return (
-          <div key={p.name} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid #0a1628"}}>
-            <div style={{flex:1}}>
-              <div style={{fontSize:12,fontWeight:600,color:"#dde8ff"}}>{p.name}</div>
-              <div style={{fontSize:10,color:"#3a5a8a"}}>
-                {p.ppg} PPG ·{" "}
-                <span style={{color:p.role==="STAR"?"#e8b87a":p.role==="KEY"?"#4a9aff":"#8899bb"}}>{p.role}</span>
-              </div>
-            </div>
-            <button onClick={()=>onCyclePlayer(p.name)} style={{padding:"4px 10px",borderRadius:12,fontSize:10,fontWeight:700,cursor:"pointer",background:sc+"22",border:`1px solid ${sc}`,color:sc,whiteSpace:"nowrap",minWidth:96,textAlign:"center"}}>
-              {p.status}
-            </button>
-          </div>
-        );
-      })}
-      <div style={{marginTop:6,fontSize:10,color:"#2a4a6a",textAlign:"center"}}>
-        PLAYING → QUESTIONABLE → DOUBTFUL → OUT
+      <div style={{ height: 6, borderRadius: 3, background: C.border, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${homeProb*100}%`, background: `linear-gradient(90deg, ${C.tealD}, ${C.teal})`, borderRadius: 3, transition: "width 0.6s ease" }}/>
       </div>
     </div>
   );
 }
 
-function MCard({icon,name,desc,homeTeam,awayTeam,homeProb,detail}){const ap=1-homeProb,hF=homeProb>=0.5;return <div style={{background:"linear-gradient(135deg,#0c1c32,#091525)",border:"1px solid #1a2d4e",borderRadius:10,padding:16}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}><span style={{fontSize:20}}>{icon}</span><div><div style={{fontFamily:"'Bebas Neue',cursive",fontSize:13,letterSpacing:1.5,color:"#c8a84b"}}>{name}</div><div style={{fontSize:10,color:"#3a5a8a"}}>{desc}</div></div></div><div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}><span style={{fontSize:10,color:"#8899bb",width:32,textAlign:"right"}}>{ABBR[homeTeam]}</span><div style={{flex:1,height:20,background:"#0a1628",borderRadius:10,overflow:"hidden",position:"relative"}}><div style={{position:"absolute",left:0,top:0,height:"100%",width:`${homeProb*100}%`,background:hF?"linear-gradient(90deg,#00a855,#00e87a)":"linear-gradient(90deg,#c84a4a,#e87a7a)",transition:"width 0.6s ease"}}/><div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 8px"}}><span style={{fontSize:11,fontWeight:700,color:"#fff",textShadow:"0 1px 3px #000"}}>{(homeProb*100).toFixed(1)}%</span><span style={{fontSize:11,fontWeight:700,color:"#fff",textShadow:"0 1px 3px #000"}}>{(ap*100).toFixed(1)}%</span></div></div><span style={{fontSize:10,color:"#8899bb",width:32}}>{ABBR[awayTeam]}</span></div><div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:11,color:hF?"#00e87a":"#4a6a9a",fontWeight:hF?700:400}}>{hF?`▲ ${homeTeam.split(" ").at(-1)} favored`:homeTeam.split(" ").at(-1)}</span><span style={{fontSize:11,color:!hF?"#00e87a":"#4a6a9a",fontWeight:!hF?700:400}}>{!hF?`▲ ${awayTeam.split(" ").at(-1)} favored`:awayTeam.split(" ").at(-1)}</span></div>{detail&&<div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #0f1e32",fontSize:10,color:"#3a5a8a",lineHeight:1.7}}>{detail}</div>}</div>;}
+function OddsPill({ prob }) {
+  const odds = probToAmericanOdds(prob);
+  const fav = prob >= 0.5;
+  return (
+    <div className="odds-pill" style={{
+      padding: "10px 18px", borderRadius: 8, textAlign: "center",
+      background: fav ? `linear-gradient(135deg, ${C.tealD}22, ${C.teal}11)` : C.black,
+      border: `1.5px solid ${fav ? C.teal : C.border}`,
+      minWidth: 80,
+    }}>
+      <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 900, fontSize: 22, color: fav ? C.teal : C.white, letterSpacing: -0.5 }}>{odds}</div>
+      <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: 1, marginTop: 1 }}>Fair odds</div>
+    </div>
+  );
+}
+
+function RosterPanel({ teamName, teamData, onCyclePlayer }) {
+  if (!teamData) return null;
+  return (
+    <div className="fade-in" style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
+      {/* Team header */}
+      <div style={{ padding: "10px 14px", background: C.dark, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 10 }}>
+        <Badge abbr={ABBR[teamName]} size={36}/>
+        <div>
+          <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 800, fontSize: 15, color: C.white, letterSpacing: 0.3 }}>{teamName}</div>
+          <div style={{ fontSize: 11, color: C.muted }}>{teamData.wins}W – {teamData.losses}L &nbsp;·&nbsp; {teamData.ppg} PPG &nbsp;·&nbsp; {teamData.opp} OPP</div>
+        </div>
+      </div>
+      {/* Roster rows */}
+      <div style={{ padding: "6px 0" }}>
+        {(teamData.roster || []).map(p => {
+          const sc = STATUS_COLORS[p.status] || C.teal;
+          return (
+            <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 14px", borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "'Barlow'", fontWeight: 600, fontSize: 13, color: C.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
+                  {p.ppg} PPG &nbsp;·&nbsp;
+                  <span style={{ color: p.role==="STAR" ? C.copper : p.role==="KEY" ? C.teal : C.muted }}>{p.role}</span>
+                </div>
+              </div>
+              <button className="status-btn" onClick={() => onCyclePlayer(p.name)} style={{
+                padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                cursor: "pointer", border: `1.5px solid ${sc}`,
+                background: sc + "18", color: sc,
+                fontFamily: "'Barlow Condensed'", letterSpacing: 0.8,
+                minWidth: 100, textAlign: "center",
+              }}>{p.status}</button>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ padding: "8px 14px", fontSize: 10, color: C.dim, textAlign: "center", borderTop: `1px solid ${C.border}` }}>
+        TAP STATUS TO CYCLE: PLAYING → QUESTIONABLE → DOUBTFUL → OUT
+      </div>
+    </div>
+  );
+}
+
+function ModelCard({ icon, name, desc, homeTeam, awayTeam, homeProb, detail }) {
+  const ap = 1 - homeProb;
+  const hFav = homeProb >= 0.5;
+  return (
+    <div className="model-card" style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 18 }}>{icon}</span>
+        <div>
+          <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 800, fontSize: 13, color: C.copper, letterSpacing: 1, textTransform: "uppercase" }}>{name}</div>
+          <div style={{ fontSize: 10, color: C.muted }}>{desc}</div>
+        </div>
+      </div>
+      {/* Teams row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+          <Badge abbr={ABBR[homeTeam]} size={28}/>
+          <div>
+            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 900, fontSize: 20, color: hFav ? C.teal : C.white, lineHeight: 1 }}>{(homeProb*100).toFixed(0)}%</div>
+            <div style={{ fontSize: 9, color: C.muted }}>{homeTeam.split(" ").at(-1)}</div>
+          </div>
+        </div>
+        <div style={{ width: 1, height: 32, background: C.border }}/>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, justifyContent: "flex-end" }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 900, fontSize: 20, color: !hFav ? C.teal : C.white, lineHeight: 1 }}>{(ap*100).toFixed(0)}%</div>
+            <div style={{ fontSize: 9, color: C.muted }}>{awayTeam.split(" ").at(-1)}</div>
+          </div>
+          <Badge abbr={ABBR[awayTeam]} size={28}/>
+        </div>
+      </div>
+      {/* Bar */}
+      <div style={{ height: 4, borderRadius: 2, background: C.border, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${homeProb*100}%`, background: `linear-gradient(90deg,${C.tealD},${C.teal})`, transition: "width 0.5s ease" }}/>
+      </div>
+      {detail && <div style={{ fontSize: 10, color: C.muted, lineHeight: 1.5 }}>{detail}</div>}
+    </div>
+  );
+}
 
 export default function App() {
   const [homeTeam, setHomeTeam] = useState("");
@@ -131,148 +272,177 @@ export default function App() {
     })});
   };
 
-  const handleFetchAndRun = async () => {
-    if (!homeTeam || !awayTeam) { setError("Please select both teams."); return; }
-    if (homeTeam === awayTeam) { setError("Please select two different teams."); return; }
-    setError("");
-    setLoading(true);
-    setResults(null);
-    setDataLoaded(false);
+  const runModels = (hd, ad) => {
+    const elo = modelElo(hd, ad);
+    const rap = modelRaptor(hd, ad);
+    const ff  = modelFourFactors(hd, ad);
+    const ml  = modelML(hd, ad);
+    const mc  = modelMonteCarlo(hd, ad);
+    const cons = modelConsensus([elo.homeProb,rap.homeProb,ff.homeProb,ml.homeProb,mc.homeProb]);
+    setResults({elo,rap,ff,ml,mc,cons});
+    setTab("results");
+  };
 
+  const handleFetch = async () => {
+    if (!homeTeam || !awayTeam) { setError("Select both teams first."); return; }
+    if (homeTeam === awayTeam) { setError("Select two different teams."); return; }
+    setError(""); setLoading(true); setResults(null); setDataLoaded(false);
     try {
       const matchup = await fetchMatchup(homeTeam, awayTeam);
-      const hd = matchup.home;
-      const ad = matchup.away;
-      setHomeData(hd);
-      setAwayData(ad);
+      setHomeData(matchup.home); setAwayData(matchup.away);
       setDataLoaded(true);
-
-      // Run models immediately with fetched data
-      const elo = modelElo(hd, ad);
-      const rap = modelRaptor(hd, ad);
-      const ff  = modelFourFactors(hd, ad);
-      const ml  = modelML(hd, ad);
-      const mc  = modelMonteCarlo(hd, ad);
-      const cons = modelConsensus([elo.homeProb, rap.homeProb, ff.homeProb, ml.homeProb, mc.homeProb]);
-      setResults({elo, rap, ff, ml, mc, cons});
-      setTab("results");
-    } catch(e) {
-      setError(`Failed to fetch data: ${e.message}`);
-    }
+      runModels(matchup.home, matchup.away);
+    } catch(e) { setError(`Failed: ${e.message}`); }
     setLoading(false);
   };
 
-  const handleRerun = () => {
-    if (!homeData || !awayData) return;
-    const elo = modelElo(homeData, awayData);
-    const rap = modelRaptor(homeData, awayData);
-    const ff  = modelFourFactors(homeData, awayData);
-    const ml  = modelML(homeData, awayData);
-    const mc  = modelMonteCarlo(homeData, awayData);
-    const cons = modelConsensus([elo.homeProb, rap.homeProb, ff.homeProb, ml.homeProb, mc.homeProb]);
-    setResults({elo, rap, ff, ml, mc, cons});
-  };
+  const handleRerun = () => { if (homeData && awayData) runModels(homeData, awayData); };
 
-  const sig = e => {
-    const v = parseFloat(e);
-    return v>=5?{l:"STRONG BET ✓",c:"#00e87a"}:v>=2?{l:"LEAN BET ↑",c:"#7be87a"}:v>=0?{l:"SLIGHT EDGE ~",c:"#e8d87a"}:{l:"NO VALUE ✗",c:"#e87a7a"};
-  };
+  const inp = { width:"100%",padding:"10px 12px",background:C.black,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif" };
+  const sel = { ...inp, cursor:"pointer" };
 
-  const cs = {
-    app:{minHeight:"100vh",background:"linear-gradient(160deg,#050c18 0%,#091525 60%,#050e1c 100%)",fontFamily:"'Inter',sans-serif",color:"#dde8ff"},
-    hdr:{background:"linear-gradient(90deg,#091525,#0d1e38,#091525)",borderBottom:"1px solid #1a2d4e",padding:"16px 24px",display:"flex",alignItems:"center"},
-    wrap:{maxWidth:1020,margin:"0 auto",padding:"20px 14px"},
-    card:{background:"linear-gradient(135deg,#0c1c32,#091525)",border:"1px solid #1a2d4e",borderRadius:12,padding:20,marginBottom:16},
-    sec:{fontFamily:"'Bebas Neue',cursive",fontSize:15,letterSpacing:2,color:"#c8a84b",margin:"0 0 14px"},
-    lbl:{fontSize:10,color:"#3a5a8a",letterSpacing:1,marginBottom:5,display:"block",textTransform:"uppercase"},
-    sel:{width:"100%",padding:"10px 12px",background:"#050c18",border:"1px solid #1a2d4e",borderRadius:8,color:"#dde8ff",fontSize:13,outline:"none",cursor:"pointer"},
-    inp:{width:"100%",padding:"10px 12px",background:"#050c18",border:"1px solid #1a2d4e",borderRadius:8,color:"#dde8ff",fontSize:13,outline:"none",boxSizing:"border-box"},
-    btn:{width:"100%",padding:13,background:"linear-gradient(90deg,#c8a84b,#e8c870)",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"'Bebas Neue',cursive",fontSize:17,letterSpacing:2,color:"#050c18",marginTop:10},
-    pill:col=>({display:"inline-block",padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:col+"22",border:`1px solid ${col}`,color:col}),
-    tabB:a=>({padding:"8px 16px",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",background:a?"#c8a84b":"transparent",color:a?"#050c18":"#4a6a9a",fontFamily:"'Bebas Neue',cursive",letterSpacing:1}),
-    prob:p=>({fontFamily:"'Bebas Neue',cursive",fontSize:44,lineHeight:1,color:p>0.56?"#00e87a":p>0.44?"#c8a84b":"#e87a7a"}),
-  };
-
-  const outCount = data => data?.roster?.filter(p=>p.status!=="PLAYING").length || 0;
+  const outCount = d => d?.roster?.filter(p=>p.status!=="PLAYING").length||0;
 
   return (
-    <div style={cs.app}>
-      <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700&display=swap" rel="stylesheet"/>
-      <div style={cs.hdr}>
-        <div>
-          <div style={{fontFamily:"'Bebas Neue',cursive",fontSize:26,letterSpacing:3,color:"#c8a84b",textShadow:"0 0 24px rgba(200,168,75,0.5)"}}>COURT EDGE</div>
-          <div style={{fontSize:10,color:"#3a5a8a",letterSpacing:2,marginTop:-2}}>NBA MONEYLINE · 5-MODEL SYSTEM · 2025-26 LIVE DATA</div>
-        </div>
-        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
-          <span style={cs.pill("#00e87a")}>LIVE 2025-26</span>
-          <span style={cs.pill("#e8b87a")}>5 MODELS</span>
-          <span style={cs.pill("#c8a84b")}>INJURY TRACKING</span>
+    <div style={{ minHeight:"100vh", background:C.black, fontFamily:"'Barlow',sans-serif", color:C.white }}>
+      <style>{styles}</style>
+      
+      {/* HEADER */}
+      <div style={{ background:C.dark, borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ maxWidth:1040, margin:"0 auto", padding:"0 16px" }}>
+          <div style={{ display:"flex", alignItems:"center", height:56, gap:12 }}>
+            {/* Logo */}
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginRight:8 }}>
+              <div style={{ width:32, height:32, borderRadius:6, background:`linear-gradient(135deg,${C.copper},${C.copperL})`, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <span style={{ fontSize:16 }}>🏀</span>
+              </div>
+              <div>
+                <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:20, color:C.white, letterSpacing:1, lineHeight:1 }}>COURT EDGE</div>
+                <div style={{ fontSize:9, color:C.copper, letterSpacing:2, textTransform:"uppercase" }}>NBA Analytics</div>
+              </div>
+            </div>
+            {/* Nav pills */}
+            <div style={{ display:"flex", gap:4, marginLeft:"auto", alignItems:"center" }}>
+              {[["🏆","NBA"],["📊","Models"],["⚡","Live"]].map(([icon,label])=>(
+                <div key={label} style={{ padding:"5px 12px", borderRadius:20, background:C.card, border:`1px solid ${C.border}`, fontSize:11, color:C.muted, display:"flex", gap:5, alignItems:"center" }}>
+                  <span>{icon}</span><span style={{ fontFamily:"'Barlow Condensed'", fontWeight:700, letterSpacing:0.5 }}>{label}</span>
+                </div>
+              ))}
+              <div style={{ marginLeft:6, padding:"5px 14px", borderRadius:20, background:`linear-gradient(90deg,${C.copper},${C.copperL})`, fontSize:11, fontWeight:700, color:C.black, fontFamily:"'Barlow Condensed'", letterSpacing:1 }}>
+                2025–26 LIVE
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div style={cs.wrap}>
-        <div style={cs.card}>
-          <p style={cs.sec}>⚡ SELECT MATCHUP</p>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 32px 1fr",gap:12,alignItems:"start"}}>
-            <div>
-              <span style={cs.lbl}>Home Team</span>
-              <select style={cs.sel} value={homeTeam} onChange={e=>{setHomeTeam(e.target.value);setHomeData(null);setResults(null);setDataLoaded(false);}}>
-                <option value="">Select team...</option>
-                {NBA_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
-              </select>
-              <div style={{marginTop:8}}>
-                <span style={cs.lbl}>Home Moneyline (optional)</span>
-                <input style={cs.inp} placeholder="-150" value={homeOdds} onChange={e=>setHomeOdds(e.target.value)}/>
-              </div>
-            </div>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Bebas Neue',cursive",fontSize:18,color:"#3a5a8a",paddingTop:36}}>VS</div>
-            <div>
-              <span style={cs.lbl}>Away Team</span>
-              <select style={cs.sel} value={awayTeam} onChange={e=>{setAwayTeam(e.target.value);setAwayData(null);setResults(null);setDataLoaded(false);}}>
-                <option value="">Select team...</option>
-                {NBA_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
-              </select>
-              <div style={{marginTop:8}}>
-                <span style={cs.lbl}>Away Moneyline (optional)</span>
-                <input style={cs.inp} placeholder="+130" value={awayOdds} onChange={e=>setAwayOdds(e.target.value)}/>
-              </div>
-            </div>
+      <div style={{ maxWidth:1040, margin:"0 auto", padding:"16px" }}>
+
+        {/* MATCHUP SELECTOR — FanDuel-style card */}
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden", marginBottom:14 }}>
+          {/* Card header bar */}
+          <div style={{ padding:"10px 16px", background:`linear-gradient(90deg,${C.copper}22,transparent)`, borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:8 }}>
+            <div style={{ width:3, height:16, borderRadius:2, background:C.copper }}/>
+            <span style={{ fontFamily:"'Barlow Condensed'", fontWeight:800, fontSize:14, letterSpacing:1.5, color:C.white, textTransform:"uppercase" }}>Select Matchup</span>
+            <span style={{ marginLeft:"auto", fontSize:11, color:C.muted }}>2025–26 NBA Season</span>
           </div>
 
-          {error && <div style={{background:"#180a0a",border:"1px solid #4a1a1a",borderRadius:8,padding:"12px 14px",marginTop:14,color:"#e87a7a",fontSize:12}}>⚠️ {error}</div>}
-
-          <button style={{...cs.btn,opacity:loading?0.6:1}} onClick={handleFetchAndRun} disabled={loading}>
-            {loading ? "⏳ FETCHING LIVE 2025-26 DATA..." : "🔍 FETCH LIVE DATA & RUN MODELS"}
-          </button>
-
-          {loading && (
-            <div style={{marginTop:12,background:"#050c18",border:"1px solid #1a2d4e",borderRadius:8,padding:14,textAlign:"center"}}>
-              <div style={{fontSize:12,color:"#4a9aff",marginBottom:4}}>Searching for current 2025-26 season stats, rosters & injury reports...</div>
-              <div style={{fontSize:10,color:"#3a5a8a"}}>This takes ~15-20 seconds · Using live web search</div>
+          <div style={{ padding:16 }}>
+            {/* Team pickers */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:12, alignItems:"center", marginBottom:14 }}>
+              {/* Home */}
+              <div>
+                <div style={{ fontSize:10, color:C.copper, fontFamily:"'Barlow Condensed'", fontWeight:700, letterSpacing:1.5, textTransform:"uppercase", marginBottom:6 }}>🏠 Home Team</div>
+                <select style={sel} value={homeTeam} onChange={e=>{setHomeTeam(e.target.value);setHomeData(null);setResults(null);setDataLoaded(false);}}>
+                  <option value="">Select team...</option>
+                  {NBA_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              {/* VS badge */}
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, paddingTop:20 }}>
+                <div style={{ width:36, height:36, borderRadius:"50%", background:C.dark, border:`2px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:12, color:C.muted }}>VS</div>
+              </div>
+              {/* Away */}
+              <div>
+                <div style={{ fontSize:10, color:C.teal, fontFamily:"'Barlow Condensed'", fontWeight:700, letterSpacing:1.5, textTransform:"uppercase", marginBottom:6 }}>✈️ Away Team</div>
+                <select style={sel} value={awayTeam} onChange={e=>{setAwayTeam(e.target.value);setAwayData(null);setResults(null);setDataLoaded(false);}}>
+                  <option value="">Select team...</option>
+                  {NBA_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
             </div>
-          )}
+
+            {/* Moneyline inputs */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 36px 1fr", gap:12, marginBottom:16 }}>
+              <div>
+                <div style={{ fontSize:10, color:C.muted, letterSpacing:1, marginBottom:5, textTransform:"uppercase" }}>Home Moneyline</div>
+                <input style={inp} placeholder="-150" value={homeOdds} onChange={e=>setHomeOdds(e.target.value)}/>
+              </div>
+              <div/>
+              <div>
+                <div style={{ fontSize:10, color:C.muted, letterSpacing:1, marginBottom:5, textTransform:"uppercase" }}>Away Moneyline</div>
+                <input style={inp} placeholder="+130" value={awayOdds} onChange={e=>setAwayOdds(e.target.value)}/>
+              </div>
+            </div>
+
+            {error && (
+              <div style={{ padding:"10px 14px", background:"#2a0f0f", border:`1px solid #5a2020`, borderRadius:8, marginBottom:12, fontSize:12, color:"#f87171" }}>
+                ⚠️ {error}
+              </div>
+            )}
+
+            {/* CTA Button */}
+            <button className="fetch-btn" onClick={handleFetch} disabled={loading} style={{
+              width:"100%", padding:"13px 0",
+              background: loading ? C.dim : `linear-gradient(90deg,${C.copper},${C.copperL})`,
+              border:"none", borderRadius:9, cursor: loading?"not-allowed":"pointer",
+              fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:17, letterSpacing:2,
+              color: loading ? C.muted : C.black, textTransform:"uppercase",
+            }}>
+              {loading ? (
+                <span className="pulse">⏳ &nbsp;Fetching Live 2025–26 Data…</span>
+              ) : "🔍  Fetch Live Data & Analyze"}
+            </button>
+
+            {loading && (
+              <div style={{ marginTop:10, padding:"10px 14px", background:C.black, border:`1px solid ${C.border}`, borderRadius:8, textAlign:"center" }}>
+                <div style={{ fontSize:11, color:C.teal }} className="pulse">Searching current season stats, rosters & injury reports…</div>
+                <div style={{ fontSize:10, color:C.muted, marginTop:3 }}>Takes ~15–20 seconds · Powered by live web search</div>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Rosters shown after data loads — allow injury adjustments then re-run */}
+        {/* ROSTER / INJURY PANEL */}
         {dataLoaded && homeData && awayData && (
-          <div style={cs.card}>
-            <p style={cs.sec}>🏥 ADJUST INJURY STATUS — TAP ANY PLAYER TO CHANGE</p>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              <RosterPanel teamName={homeTeam} teamData={homeData} onCyclePlayer={name=>cyclePlayer("home",name)}/>
-              <RosterPanel teamName={awayTeam} teamData={awayData} onCyclePlayer={name=>cyclePlayer("away",name)}/>
+          <div className="fade-in" style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden", marginBottom:14 }}>
+            <div style={{ padding:"10px 16px", background:`linear-gradient(90deg,${C.teal}22,transparent)`, borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:8 }}>
+              <div style={{ width:3, height:16, borderRadius:2, background:C.teal }}/>
+              <span style={{ fontFamily:"'Barlow Condensed'", fontWeight:800, fontSize:14, letterSpacing:1.5, color:C.white, textTransform:"uppercase" }}>Injury Report</span>
+              <div style={{ marginLeft:"auto", display:"flex", gap:6 }}>
+                {outCount(homeData)>0 && <span style={{ padding:"2px 8px", borderRadius:12, background:"#e0525218", border:`1px solid #E05252`, color:"#E05252", fontSize:10, fontWeight:700 }}>{ABBR[homeTeam]} {outCount(homeData)} OUT</span>}
+                {outCount(awayData)>0 && <span style={{ padding:"2px 8px", borderRadius:12, background:"#e0525218", border:`1px solid #E05252`, color:"#E05252", fontSize:10, fontWeight:700 }}>{ABBR[awayTeam]} {outCount(awayData)} OUT</span>}
+                {outCount(homeData)===0 && <span style={{ padding:"2px 8px", borderRadius:12, background:C.teal+"18", border:`1px solid ${C.teal}`, color:C.teal, fontSize:10, fontWeight:700 }}>{ABBR[homeTeam]} FULL</span>}
+                {outCount(awayData)===0 && <span style={{ padding:"2px 8px", borderRadius:12, background:C.teal+"18", border:`1px solid ${C.teal}`, color:C.teal, fontSize:10, fontWeight:700 }}>{ABBR[awayTeam]} FULL</span>}
+              </div>
             </div>
-            <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
-              {outCount(homeData)>0&&<Pill label={`${ABBR[homeTeam]}: ${outCount(homeData)} player${outCount(homeData)>1?"s":""} limited`} color="#e8b87a"/>}
-              {outCount(homeData)===0&&<Pill label={`${ABBR[homeTeam]}: Full strength`} color="#00e87a"/>}
-              {outCount(awayData)>0&&<Pill label={`${ABBR[awayTeam]}: ${outCount(awayData)} player${outCount(awayData)>1?"s":""} limited`} color="#e8b87a"/>}
-              {outCount(awayData)===0&&<Pill label={`${ABBR[awayTeam]}: Full strength`} color="#00e87a"/>}
+            <div style={{ padding:14 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                <RosterPanel teamName={homeTeam} teamData={homeData} onCyclePlayer={n=>cyclePlayer("home",n)}/>
+                <RosterPanel teamName={awayTeam} teamData={awayData} onCyclePlayer={n=>cyclePlayer("away",n)}/>
+              </div>
+              <button className="rerun-btn" onClick={handleRerun} style={{
+                marginTop:12, width:"100%", padding:"11px 0",
+                background:`linear-gradient(90deg,${C.tealD},${C.teal})`,
+                border:"none", borderRadius:8, cursor:"pointer",
+                fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:15, letterSpacing:2,
+                color:C.black, textTransform:"uppercase",
+              }}>♻️  Recalculate With Updated Injuries</button>
             </div>
-            <button style={{...cs.btn,background:"linear-gradient(90deg,#1a6a3a,#00a855)",color:"#fff",fontSize:14}} onClick={handleRerun}>
-              ♻️ RECALCULATE WITH UPDATED INJURIES
-            </button>
           </div>
         )}
 
+        {/* RESULTS */}
         {results && (() => {
           const {elo,rap,ff,ml,mc,cons} = results;
           const cH=cons, cA=1-cH;
@@ -281,86 +451,135 @@ export default function App() {
           const aE=aI!==null?((cA-aI)*100).toFixed(1):null;
           const hEV=homeOdds&&hI?calcEV(cH,homeOdds):null;
           const aEV=awayOdds&&aI?calcEV(cA,awayOdds):null;
-          return <>
-            <div style={{display:"flex",gap:6,marginBottom:16,background:"#0a1525",borderRadius:8,padding:6,border:"1px solid #1a2d4e",flexWrap:"wrap",alignItems:"center"}}>
-              {[{k:"results",l:"📊 Results"},{k:"method",l:"🔬 Methodology"}].map(t=><button key={t.k} style={cs.tabB(tab===t.k)} onClick={()=>setTab(t.k)}>{t.l}</button>)}
-              {hE!==null&&<div style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap"}}>
-                <Pill label={`${homeTeam.split(" ").at(-1)}: ${parseFloat(hE)>=0?"+":""}${hE}% edge`} color={parseFloat(hE)>=2?"#00e87a":parseFloat(hE)>=0?"#e8d87a":"#e87a7a"}/>
-                <Pill label={`${awayTeam.split(" ").at(-1)}: ${parseFloat(aE)>=0?"+":""}${aE}% edge`} color={parseFloat(aE)>=2?"#00e87a":parseFloat(aE)>=0?"#e8d87a":"#e87a7a"}/>
-              </div>}
+          const sig = v => v>=5?{l:"STRONG BET",c:"#22c55e"}:v>=2?{l:"LEAN BET",c:C.teal}:v>=0?{l:"SLIGHT EDGE",c:C.copper}:{l:"NO VALUE",c:"#E05252"};
+
+          return (
+            <div className="fade-in">
+              {/* Tab bar */}
+              <div style={{ display:"flex", gap:4, marginBottom:14, background:C.dark, borderRadius:8, padding:4, border:`1px solid ${C.border}` }}>
+                {[["results","📊 Results"],["method","🔬 Methodology"]].map(([k,l])=>(
+                  <button key={k} className="tab-btn" onClick={()=>setTab(k)} style={{
+                    flex:1, padding:"8px 0", borderRadius:6, border:"none", cursor:"pointer",
+                    background: tab===k ? `linear-gradient(90deg,${C.copper}33,${C.copper}22)` : "transparent",
+                    color: tab===k ? C.copper : C.muted,
+                    fontFamily:"'Barlow Condensed'", fontWeight:800, fontSize:13, letterSpacing:1, textTransform:"uppercase",
+                    borderBottom: tab===k ? `2px solid ${C.copper}` : "2px solid transparent",
+                  }}>{l}</button>
+                ))}
+              </div>
+
+              {tab==="results" && <>
+                {/* CONSENSUS HERO CARD */}
+                <div style={{ background:C.card, border:`1.5px solid ${C.copper}44`, borderRadius:12, padding:20, marginBottom:14, position:"relative", overflow:"hidden" }}>
+                  {/* Decorative bg */}
+                  <div style={{ position:"absolute", top:-30, right:-30, width:120, height:120, borderRadius:"50%", background:C.copper+"0a", pointerEvents:"none" }}/>
+                  
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}>
+                    <div style={{ width:3, height:16, borderRadius:2, background:C.copper }}/>
+                    <span style={{ fontFamily:"'Barlow Condensed'", fontWeight:800, fontSize:14, letterSpacing:1.5, color:C.copper, textTransform:"uppercase" }}>Consensus — 5 Model Weighted Average</span>
+                  </div>
+
+                  {/* Main matchup display */}
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:16, alignItems:"center", marginBottom:16 }}>
+                    {/* Home */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
+                      <Badge abbr={ABBR[homeTeam]} size={52}/>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:42, lineHeight:1, color: cH>0.55?C.teal:cH>0.45?C.copper:C.white }}>{(cH*100).toFixed(1)}%</div>
+                        <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{homeTeam}</div>
+                      </div>
+                      <OddsPill prob={cH}/>
+                    </div>
+
+                    {/* Center */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
+                      <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:14, color:C.muted, letterSpacing:2 }}>VS</div>
+                      {hE && (
+                        <div style={{ textAlign:"center", padding:"8px 12px", background: parseFloat(hE)>=2?C.teal+"18":C.black, border:`1px solid ${parseFloat(hE)>=2?C.teal:C.border}`, borderRadius:8 }}>
+                          <div style={{ fontFamily:"'Barlow Condensed'", fontSize:11, fontWeight:800, color: parseFloat(hE)>=2?C.teal:C.muted, letterSpacing:1 }}>{sig(parseFloat(cH>cA?hE:aE)).l}</div>
+                          {hEV && <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>EV: {parseFloat(hEV)>=0?"+":""}{hEV}</div>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Away */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8 }}>
+                      <Badge abbr={ABBR[awayTeam]} size={52}/>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:42, lineHeight:1, color: cA>0.55?C.teal:cA>0.45?C.copper:C.white }}>{(cA*100).toFixed(1)}%</div>
+                        <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{awayTeam}</div>
+                      </div>
+                      <OddsPill prob={cA}/>
+                    </div>
+                  </div>
+
+                  {/* Win probability bar */}
+                  <WinBar homeProb={cH} homeAbbr={ABBR[homeTeam]} awayAbbr={ABBR[awayTeam]}/>
+
+                  {/* Edge chips */}
+                  {(hE||aE) && (
+                    <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
+                      {hE && <div style={{ padding:"5px 12px", borderRadius:6, background: parseFloat(hE)>=2?C.teal+"18":C.black, border:`1px solid ${parseFloat(hE)>=2?C.teal:C.border}`, fontSize:11, color: parseFloat(hE)>=2?C.teal:C.muted, fontFamily:"'Barlow Condensed'", fontWeight:700 }}>
+                        {ABBR[homeTeam]} Edge: {parseFloat(hE)>=0?"+":""}{hE}%{hEV?` · EV ${parseFloat(hEV)>=0?"+":""}${hEV}/$1`:""}
+                      </div>}
+                      {aE && <div style={{ padding:"5px 12px", borderRadius:6, background: parseFloat(aE)>=2?C.teal+"18":C.black, border:`1px solid ${parseFloat(aE)>=2?C.teal:C.border}`, fontSize:11, color: parseFloat(aE)>=2?C.teal:C.muted, fontFamily:"'Barlow Condensed'", fontWeight:700 }}>
+                        {ABBR[awayTeam]} Edge: {parseFloat(aE)>=0?"+":""}{aE}%{aEV?` · EV ${parseFloat(aEV)>=0?"+":""}${aEV}/$1`:""}
+                      </div>}
+                    </div>
+                  )}
+                </div>
+
+                {/* MODEL GRID */}
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+                  <ModelCard icon="♟️" name="Elo Rating" desc="Win-rate Elo + recent form + home court" homeTeam={homeTeam} awayTeam={awayTeam} homeProb={elo.homeProb} detail={`Home Elo: ${elo.hElo}  ·  Away Elo: ${elo.aElo}  ·  +100 home court`}/>
+                  <ModelCard icon="👤" name="RAPTOR Impact" desc="Player PER weighted by availability" homeTeam={homeTeam} awayTeam={awayTeam} homeProb={rap.homeProb} detail={`Home adj PER: ${rap.hVal}  ·  Away: ${rap.aVal}`}/>
+                  <ModelCard icon="📐" name="Four Factors" desc="eFG%, TOV%, OREB%, FTR + net rating" homeTeam={homeTeam} awayTeam={awayTeam} homeProb={ff.homeProb} detail={`Home: ${ff.hFF}  ·  Away: ${ff.aFF}  ·  Injury drag -${(ff.hHit*100).toFixed(1)}% / -${(ff.aHit*100).toFixed(1)}%`}/>
+                  <ModelCard icon="🤖" name="ML / BPI" desc="7-feature logistic regression model" homeTeam={homeTeam} awayTeam={awayTeam} homeProb={ml.homeProb} detail="Net rtg · Win% · Off/Def eff · L10 form · Injury penalty"/>
+                </div>
+                <ModelCard icon="🎲" name="Monte Carlo Simulation" desc="10,000 simulated games · Normal distribution scoring" homeTeam={homeTeam} awayTeam={awayTeam} homeProb={mc.homeProb} detail={`Projected: ${homeTeam.split(" ").at(-1)} ${mc.hExp}  ·  ${awayTeam.split(" ").at(-1)} ${mc.aExp} pts`}/>
+
+                {/* MODEL AGREEMENT */}
+                <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:14, marginTop:10 }}>
+                  <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:800, fontSize:13, letterSpacing:1.5, color:C.copper, textTransform:"uppercase", marginBottom:10 }}>📈 Model Agreement</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:8 }}>
+                    {[{l:"Elo",p:elo.homeProb},{l:"RAPTOR",p:rap.homeProb},{l:"4 Factors",p:ff.homeProb},{l:"ML/BPI",p:ml.homeProb},{l:"Monte Carlo",p:mc.homeProb}].map(m=>{
+                      const fav = m.p>0.5;
+                      return (
+                        <div key={m.l} style={{ textAlign:"center", background:C.black, borderRadius:8, padding:"10px 6px", border:`1px solid ${fav?C.teal+"44":C.border}` }}>
+                          <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:900, fontSize:22, color:fav?C.teal:C.white }}>{(m.p*100).toFixed(0)}%</div>
+                          <div style={{ fontSize:10, color:fav?C.teal:C.muted, fontWeight:700, marginBottom:2 }}>{fav?ABBR[homeTeam]:ABBR[awayTeam]}</div>
+                          <div style={{ fontSize:9, color:C.dim, textTransform:"uppercase", letterSpacing:0.5 }}>{m.l}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>}
+
+              {tab==="method" && (
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                  {[
+                    {icon:"♟️",n:"Elo Rating (18%)",d:"Win rate → Elo (baseline 1500). Last 10 net rating adjusts dynamically. Home court = +100 Elo pts. Win probability: 1/(1+10^(diff/400))."},
+                    {icon:"👤",n:"RAPTOR / Player Impact (22%)",d:"Each player's PER multiplied by availability weight: OUT=0%, DOUBTFUL=25%, QUESTIONABLE=65%, PLAYING=100%. Win prob = home share of total roster value."},
+                    {icon:"📐",n:"Net Rating / Four Factors (22%)",d:"eFG% (40%) + TOV rate (25%) + OREB% (20%) + FTR (15%). Blended with net rating differential. Injury drag applied by status and role."},
+                    {icon:"🤖",n:"ML / BPI-Style (22%)",d:"Logistic regression across 7 features: net rating, win%, offensive efficiency, defensive efficiency, L10 form, injury penalty, home court intercept."},
+                    {icon:"🎲",n:"Monte Carlo (16%)",d:"10,000 game simulations. Each team's score drawn from normal distribution (σ=11) centered on expected output vs opponent defense, adjusted for injuries."},
+                    {icon:"🏆",n:"Consensus Weighting",d:"Elo×18% + RAPTOR×22% + Four Factors×22% + ML×22% + MC×16%. RAPTOR and ML carry highest weight due to injury sensitivity."},
+                  ].map(({icon,n,d})=>(
+                    <div key={n} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:16 }}>
+                      <div style={{ fontSize:22, marginBottom:8 }}>{icon}</div>
+                      <div style={{ fontFamily:"'Barlow Condensed'", fontWeight:800, fontSize:13, color:C.copper, letterSpacing:0.5, marginBottom:6 }}>{n}</div>
+                      <div style={{ fontSize:11, color:C.muted, lineHeight:1.7 }}>{d}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-
-            {tab==="results"&&<>
-              <div style={{background:"linear-gradient(135deg,#0f2a0a,#091e06)",border:"1px solid #2a5a1a",borderRadius:12,padding:20,marginBottom:16}}>
-                <div style={{fontFamily:"'Bebas Neue',cursive",fontSize:13,letterSpacing:2,color:"#7be87a",marginBottom:12}}>🏆 CONSENSUS — WEIGHTED AVERAGE OF ALL 5 MODELS</div>
-                <div style={{display:"flex",alignItems:"center",gap:12}}>
-                  <div style={{textAlign:"center",minWidth:80}}>
-                    <TBadge name={homeTeam}/>
-                    <div style={cs.prob(cH)}>{(cH*100).toFixed(1)}%</div>
-                    <div style={{fontSize:11,color:"#4a8a3a"}}>{homeTeam.split(" ").at(-1)}</div>
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={{height:22,background:"#0a1628",borderRadius:11,overflow:"hidden",marginBottom:8}}>
-                      <div style={{height:"100%",width:`${cH*100}%`,background:"linear-gradient(90deg,#00a855,#00e87a)",transition:"width 0.8s ease"}}/>
-                    </div>
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center"}}>
-                      <span style={cs.pill("#c8a84b")}>Fair home: {probToAmericanOdds(cH)}</span>
-                      <span style={cs.pill("#c8a84b")}>Fair away: {probToAmericanOdds(cA)}</span>
-                      {hE&&<Pill large label={`${homeTeam.split(" ").at(-1)}: ${hEV?`EV ${parseFloat(hEV)>=0?"+":""}${hEV}/$1`:hE+"% edge"}`} color={parseFloat(hE)>=2?"#00e87a":parseFloat(hE)>=0?"#e8d87a":"#e87a7a"}/>}
-                      {aE&&<Pill large label={`${awayTeam.split(" ").at(-1)}: ${aEV?`EV ${parseFloat(aEV)>=0?"+":""}${aEV}/$1`:aE+"% edge"}`} color={parseFloat(aE)>=2?"#00e87a":parseFloat(aE)>=0?"#e8d87a":"#e87a7a"}/>}
-                      {hE&&<Pill large label={sig(cH>cA?hE:aE).l} color={sig(cH>cA?hE:aE).c}/>}
-                    </div>
-                  </div>
-                  <div style={{textAlign:"center",minWidth:80}}>
-                    <TBadge name={awayTeam}/>
-                    <div style={cs.prob(cA)}>{(cA*100).toFixed(1)}%</div>
-                    <div style={{fontSize:11,color:"#4a8a3a"}}>{awayTeam.split(" ").at(-1)}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
-                <MCard icon="♟️" name="ELO RATING" desc="Win-rate Elo + recent form + home court" homeTeam={homeTeam} awayTeam={awayTeam} homeProb={elo.homeProb} detail={`Home Elo: ${elo.hElo} · Away Elo: ${elo.aElo} · +100 home court bonus`}/>
-                <MCard icon="👤" name="RAPTOR / PLAYER IMPACT" desc="PER weighted by availability" homeTeam={homeTeam} awayTeam={awayTeam} homeProb={rap.homeProb} detail={`Home PER (adj): ${rap.hVal} · Away: ${rap.aVal}`}/>
-                <MCard icon="📐" name="NET RATING / FOUR FACTORS" desc="eFG%, TOV%, OREB%, FTR + net rating" homeTeam={homeTeam} awayTeam={awayTeam} homeProb={ff.homeProb} detail={`Home FF: ${ff.hFF} · Away: ${ff.aFF} · Injury drag -${(ff.hHit*100).toFixed(1)}% / -${(ff.aHit*100).toFixed(1)}%`}/>
-                <MCard icon="🤖" name="ML / BPI-STYLE" desc="7-feature logistic regression" homeTeam={homeTeam} awayTeam={awayTeam} homeProb={ml.homeProb} detail="Net rating · Win% · Off/Def efficiency · L10 form · Injury penalty"/>
-              </div>
-              <MCard icon="🎲" name="BAYESIAN MONTE CARLO SIMULATION" desc="10,000 simulated games · Normal distribution scoring" homeTeam={homeTeam} awayTeam={awayTeam} homeProb={mc.homeProb} detail={`Projected: ${homeTeam.split(" ").at(-1)} ${mc.hExp} · ${awayTeam.split(" ").at(-1)} ${mc.aExp} pts`}/>
-
-              <div style={{...cs.card,marginTop:12}}>
-                <p style={cs.sec}>📈 MODEL AGREEMENT</p>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
-                  {[{l:"Elo",p:elo.homeProb},{l:"RAPTOR",p:rap.homeProb},{l:"4 Factors",p:ff.homeProb},{l:"ML/BPI",p:ml.homeProb},{l:"Monte Carlo",p:mc.homeProb}].map(m=>{
-                    const fav=m.p>0.5;
-                    return <div key={m.l} style={{textAlign:"center",background:"#050c18",borderRadius:8,padding:"12px 8px",border:`1px solid ${fav?"#1a4a2a":"#3a1a1a"}`}}>
-                      <div style={{fontFamily:"'Bebas Neue',cursive",fontSize:22,color:fav?"#00e87a":"#e87a7a"}}>{(m.p*100).toFixed(0)}%</div>
-                      <div style={{fontSize:10,color:fav?"#00e87a":"#e87a7a",fontWeight:700,marginBottom:3}}>{fav?ABBR[homeTeam]:ABBR[awayTeam]}</div>
-                      <div style={{fontSize:10,color:"#3a5a8a"}}>{m.l}</div>
-                    </div>;
-                  })}
-                </div>
-              </div>
-            </>}
-
-            {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              {[
-                {icon:"♟️",n:"Elo Rating (18%)",d:"Win rate → Elo (baseline 1500). L10 net rating adjusts. Home court = +100 pts. Formula: 1/(1+10^(diff/400))."},
-                {icon:"👤",n:"RAPTOR / Player Impact (22%)",d:"PER per player × availability: OUT=0%, DOUBTFUL=25%, QUESTIONABLE=65%, PLAYING=100%. Win prob = home share of total roster value."},
-                {icon:"📐",n:"Net Rating / Four Factors (22%)",d:"eFG% (40%) + TOV rate (25%) + OREB% (20%) + FTR (15%) blended with net rating. Injury drag applied by status and role."},
-                {icon:"🤖",n:"ML / BPI-Style (22%)",d:"XGBoost-style: 7 features — net rating, win%, off/def efficiency, L10 form, injury penalty, home intercept."},
-                {icon:"🎲",n:"Monte Carlo (16%)",d:"10,000 simulated games. Scores sampled from normal distribution (σ=11) around each team's expected output vs opponent defense."},
-                {icon:"🏆",n:"Consensus Weighting",d:"Elo×18% + RAPTOR×22% + FourFactors×22% + ML×22% + MC×16%. RAPTOR & ML weighted highest for injury sensitivity."},
-              ].map(({icon,n,d})=><div key={n} style={{background:"#050c18",borderRadius:10,padding:16,border:"1px solid #1a2d4e"}}>
-                <div style={{fontSize:22,marginBottom:6}}>{icon}</div>
-                <div style={{fontSize:13,fontWeight:700,color:"#c8a84b",marginBottom:6}}>{n}</div>
-                <div style={{fontSize:11,color:"#4a6a9a",lineHeight:1.65}}>{d}</div>
-              </div>)}
-            </div>}
-          </>;
+          );
         })()}
 
-        <div style={{fontSize:11,color:"#1e3050",textAlign:"center",padding:"12px 0 6px",lineHeight:1.7}}>
-          ⚠️ For informational &amp; entertainment purposes only · Not financial advice · Please gamble responsibly
+        <div style={{ fontSize:10, color:C.dim, textAlign:"center", padding:"16px 0 8px", lineHeight:1.8 }}>
+          ⚠️ For informational &amp; entertainment purposes only · Not financial advice · Gamble responsibly
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-// v6-sequential
+// v7-ncaam
 import { useState } from "react";
 
 function oddsToImplied(o){if(!o||o==="-"||o==="+")return null;const n=parseInt(o);if(isNaN(n)||n===0)return null;return n>0?100/(n+100):Math.abs(n)/(Math.abs(n)+100);}
@@ -6,7 +6,7 @@ function probToAmerican(p){p=Math.max(0.01,Math.min(0.99,p));return p>=0.5?("-"+
 function calcEV(prob,odds){const o=parseInt(odds);if(isNaN(o))return null;const pay=o>0?o/100:100/Math.abs(o);return(prob*pay-(1-prob)).toFixed(3);}
 function logistic(x){return 1/(1+Math.exp(-x));}
 
-const C={black:"#0A0A0C",dark:"#111116",card:"#16161C",border:"#242430",copper:"#B87333",copperL:"#D4924A",teal:"#2DD4A0",tealD:"#1A9E78",ice:"#A8D8EA",iceD:"#5BAACB",white:"#F0F0F5",muted:"#6B6B80",dim:"#3A3A4A"};
+const C={black:"#0A0A0C",dark:"#111116",card:"#16161C",border:"#242430",copper:"#B87333",copperL:"#D4924A",teal:"#2DD4A0",tealD:"#1A9E78",ice:"#A8D8EA",iceD:"#5BAACB",amber:"#F59E0B",amberD:"#D97706",white:"#F0F0F5",muted:"#6B6B80",dim:"#3A3A4A"};
 
 const STYLES=`
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@400;500;600&display=swap');
@@ -44,7 +44,10 @@ function RosterPanel({teamName,abbr,teamData,onCycle,sport,accent,loading}){
     <div style={{fontSize:12,color:C.muted}}>Loading {teamName} roster...</div>
   </div>;
   if(!teamData) return null;
-  const subtitle=sport==="nhl"?teamData.wins+"W-"+teamData.losses+"L-"+teamData.otl+"OTL - "+teamData.gf_pg+" GF/G - "+teamData.ga_pg+" GA/G":teamData.wins+"W-"+teamData.losses+"L - "+teamData.ppg+" PPG - "+teamData.opp+" OPP";
+  let subtitle;
+  if(sport==="nhl") subtitle=teamData.wins+"W-"+teamData.losses+"L-"+teamData.otl+"OTL - "+teamData.gf_pg+" GF/G - "+teamData.ga_pg+" GA/G";
+  else if(sport==="ncaam") subtitle=teamData.wins+"W-"+teamData.losses+"L - "+teamData.ppg+" PPG - "+teamData.opp+" OPP"+(teamData.ranking>0?" - #"+teamData.ranking+" AP":"")+" - "+teamData.conference;
+  else subtitle=teamData.wins+"W-"+teamData.losses+"L - "+teamData.ppg+" PPG - "+teamData.opp+" OPP";
   return <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,overflow:"hidden"}}>
     <div style={{padding:"10px 14px",background:C.dark,borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:10}}>
       <Badge abbr={abbr} size={36} accent={ac}/>
@@ -58,7 +61,10 @@ function RosterPanel({teamName,abbr,teamData,onCycle,sport,accent,loading}){
     <div style={{padding:"4px 0",maxHeight:360,overflowY:"auto"}}>
       {(teamData.roster||[]).map(p=>{
         const sc=STATUS_COLORS[p.status]||C.teal;
-        const sub=sport==="nhl"?p.goals+"G "+p.assists+"A "+p.points+"PTS "+(p.plus_minus>=0?"+":"")+p.plus_minus:p.ppg+" PPG";
+        let sub;
+        if(sport==="nhl") sub=p.goals+"G "+p.assists+"A "+p.points+"PTS "+(p.plus_minus>=0?"+":"")+p.plus_minus;
+        else if(sport==="ncaam") sub=p.ppg+" PPG - "+p.rpg+" RPG - "+p.apg+" APG";
+        else sub=p.ppg+" PPG";
         return <div key={p.name} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 14px",borderBottom:"1px solid "+C.border}}>
           {sport==="nhl"&&<span style={{fontSize:10,color:C.dim,fontFamily:"'Barlow Condensed'",fontWeight:700,width:20,textAlign:"center"}}>{p.position}</span>}
           <div style={{flex:1,minWidth:0}}><div style={{fontFamily:"'Barlow'",fontWeight:600,fontSize:13,color:C.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div><div style={{fontSize:10,color:C.muted,marginTop:1}}>{sub} - <span style={{color:p.role==="STAR"?C.copper:p.role==="KEY"?ac:C.muted}}>{p.role}</span></div></div>
@@ -87,6 +93,7 @@ function ModelCard({icon,name,desc,awayTeam,homeTeam,awayAbbr,homeAbbr,awayProb,
   </div>;
 }
 
+// â”€â”€â”€ NBA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const NBA_TEAMS=["Atlanta Hawks","Boston Celtics","Brooklyn Nets","Charlotte Hornets","Chicago Bulls","Cleveland Cavaliers","Dallas Mavericks","Denver Nuggets","Detroit Pistons","Golden State Warriors","Houston Rockets","Indiana Pacers","LA Clippers","Los Angeles Lakers","Memphis Grizzlies","Miami Heat","Milwaukee Bucks","Minnesota Timberwolves","New Orleans Pelicans","New York Knicks","Oklahoma City Thunder","Orlando Magic","Philadelphia 76ers","Phoenix Suns","Portland Trail Blazers","Sacramento Kings","San Antonio Spurs","Toronto Raptors","Utah Jazz","Washington Wizards"];
 const NBA_ABBR={"Atlanta Hawks":"ATL","Boston Celtics":"BOS","Brooklyn Nets":"BKN","Charlotte Hornets":"CHA","Chicago Bulls":"CHI","Cleveland Cavaliers":"CLE","Dallas Mavericks":"DAL","Denver Nuggets":"DEN","Detroit Pistons":"DET","Golden State Warriors":"GSW","Houston Rockets":"HOU","Indiana Pacers":"IND","LA Clippers":"LAC","Los Angeles Lakers":"LAL","Memphis Grizzlies":"MEM","Miami Heat":"MIA","Milwaukee Bucks":"MIL","Minnesota Timberwolves":"MIN","New Orleans Pelicans":"NOP","New York Knicks":"NYK","Oklahoma City Thunder":"OKC","Orlando Magic":"ORL","Philadelphia 76ers":"PHI","Phoenix Suns":"PHX","Portland Trail Blazers":"POR","Sacramento Kings":"SAC","San Antonio Spurs":"SAS","Toronto Raptors":"TOR","Utah Jazz":"UTA","Washington Wizards":"WAS"};
 
@@ -98,115 +105,27 @@ function nbaMdlMC(h,a,N=8000){const ih=r=>(r||[]).reduce((s,p)=>p.status==="PLAY
 function nbaConsensus(ps){return Math.min(.97,Math.max(.03,[.18,.22,.22,.22,.16].reduce((s,w,i)=>s+ps[i]*w,0)));}
 
 function NBAPage(){
-  const [awayTeam,setAwayTeam]=useState("");
-  const [homeTeam,setHomeTeam]=useState("");
-  const [awayOdds,setAwayOdds]=useState("");
-  const [homeOdds,setHomeOdds]=useState("");
-  const [awayData,setAwayData]=useState(null);
-  const [homeData,setHomeData]=useState(null);
-  const [awayLoading,setAwayLoading]=useState(false);
-  const [homeLoading,setHomeLoading]=useState(false);
-  const [awayError,setAwayError]=useState("");
-  const [homeError,setHomeError]=useState("");
-  const [results,setResults]=useState(null);
-  const [tab,setTab]=useState("results");
-  const [analyzing,setAnalyzing]=useState(false);
-
-  const fetchTeam = async (team, side) => {
-    const setLoading = side==="away"?setAwayLoading:setHomeLoading;
-    const setData = side==="away"?setAwayData:setHomeData;
-    const setError = side==="away"?setAwayError:setHomeError;
-    setLoading(true); setData(null); setError(""); setResults(null);
-    try {
-      const r = await fetch("/api/team", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({team, sport:"nba"})});
-      const d = await r.json();
-      if(!r.ok) throw new Error(d.error||"Error "+r.status);
-      setData(d);
-    } catch(e) { setError(e.message); }
-    setLoading(false);
-  };
-
-  const cyclePlayer=(side,name)=>{
-    const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];
-    if(!g)return;
-    s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});
-  };
-
-  const runModels=()=>{
-    if(!homeData||!awayData)return;
-    setAnalyzing(true);
-    setTimeout(()=>{
-      const elo=nbaMdlElo(homeData,awayData),rap=nbaMdlRaptor(homeData,awayData),ff=nbaMdlFF(homeData,awayData),ml=nbaMdlML(homeData,awayData),mc=nbaMdlMC(homeData,awayData);
-      setResults({elo,rap,ff,ml,mc,cons:nbaConsensus([elo.homeProb,rap.homeProb,ff.homeProb,ml.homeProb,mc.homeProb])});
-      setTab("results"); setAnalyzing(false);
-    },50);
-  };
-
+  const [awayTeam,setAwayTeam]=useState("");const [homeTeam,setHomeTeam]=useState("");const [awayOdds,setAwayOdds]=useState("");const [homeOdds,setHomeOdds]=useState("");const [awayData,setAwayData]=useState(null);const [homeData,setHomeData]=useState(null);const [awayLoading,setAwayLoading]=useState(false);const [homeLoading,setHomeLoading]=useState(false);const [awayError,setAwayError]=useState("");const [homeError,setHomeError]=useState("");const [results,setResults]=useState(null);const [tab,setTab]=useState("results");const [analyzing,setAnalyzing]=useState(false);
+  const fetchTeam=async(team,side)=>{const setL=side==="away"?setAwayLoading:setHomeLoading;const setD=side==="away"?setAwayData:setHomeData;const setE=side==="away"?setAwayError:setHomeError;setL(true);setD(null);setE("");setResults(null);try{const r=await fetch("/api/team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({team,sport:"nba"})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);setD(d);}catch(e){setE(e.message);}setL(false);};
+  const cyclePlayer=(side,name)=>{const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];if(!g)return;s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});};
+  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const elo=nbaMdlElo(homeData,awayData),rap=nbaMdlRaptor(homeData,awayData),ff=nbaMdlFF(homeData,awayData),ml=nbaMdlML(homeData,awayData),mc=nbaMdlMC(homeData,awayData);setResults({elo,rap,ff,ml,mc,cons:nbaConsensus([elo.homeProb,rap.homeProb,ff.homeProb,ml.homeProb,mc.homeProb])});setTab("results");setAnalyzing(false);},50);};
   const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
-  const bothLoaded=awayData&&homeData;
-  const awayAbbr=NBA_ABBR[awayTeam]||"AWY";
-  const homeAbbr=NBA_ABBR[homeTeam]||"HME";
-
+  const bothLoaded=awayData&&homeData;const awayAbbr=NBA_ABBR[awayTeam]||"AWY";const homeAbbr=NBA_ABBR[homeTeam]||"HME";
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
-
-    {/* Step 1: Away Team */}
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
       <SectionHeader label="Step 1 - Select Away Team" accent={C.teal} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.teal}/>}/>
-      <div style={{padding:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"flex-end"}}>
-          <div>
-            <div style={{fontSize:10,color:C.teal,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>Away Team</div>
-            <select style={{...inp,cursor:"pointer"}} value={awayTeam} onChange={e=>{setAwayTeam(e.target.value);setAwayData(null);setResults(null);}}>
-              <option value="">Select away team...</option>{NBA_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <button className="hov-btn" onClick={()=>fetchTeam(awayTeam,"away")} disabled={!awayTeam||awayLoading} style={{padding:"10px 20px",background:awayTeam&&!awayLoading?"linear-gradient(90deg,"+C.tealD+","+C.teal+")":C.dim,border:"none",borderRadius:8,cursor:awayTeam&&!awayLoading?"pointer":"not-allowed",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,letterSpacing:1.5,color:awayTeam&&!awayLoading?C.black:C.muted,textTransform:"uppercase",whiteSpace:"nowrap"}}>
-            {awayLoading?<span className="pulse">Loading...</span>:"Load Roster"}
-          </button>
-        </div>
-        {awayError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{awayError}</div>}
-      </div>
-      {(awayLoading||awayData)&&<div style={{padding:"0 14px 14px"}}>
-        <RosterPanel teamName={awayTeam} abbr={awayAbbr} teamData={awayData} onCycle={n=>cyclePlayer("away",n)} sport="nba" accent={C.teal} loading={awayLoading}/>
-      </div>}
+      <div style={{padding:14}}><div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"flex-end"}}><div><div style={{fontSize:10,color:C.teal,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>Away Team</div><select style={{...inp,cursor:"pointer"}} value={awayTeam} onChange={e=>{setAwayTeam(e.target.value);setAwayData(null);setResults(null);}}><option value="">Select away team...</option>{NBA_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}</select></div><button className="hov-btn" onClick={()=>fetchTeam(awayTeam,"away")} disabled={!awayTeam||awayLoading} style={{padding:"10px 20px",background:awayTeam&&!awayLoading?"linear-gradient(90deg,"+C.tealD+","+C.teal+")":C.dim,border:"none",borderRadius:8,cursor:awayTeam&&!awayLoading?"pointer":"not-allowed",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,letterSpacing:1.5,color:awayTeam&&!awayLoading?C.black:C.muted,textTransform:"uppercase",whiteSpace:"nowrap"}}>{awayLoading?<span className="pulse">Loading...</span>:"Load Roster"}</button></div>{awayError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{awayError}</div>}</div>
+      {(awayLoading||awayData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={awayTeam} abbr={awayAbbr} teamData={awayData} onCycle={n=>cyclePlayer("away",n)} sport="nba" accent={C.teal} loading={awayLoading}/></div>}
     </div>
-
-    {/* Step 2: Home Team */}
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
       <SectionHeader label="Step 2 - Select Home Team" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
-      <div style={{padding:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"flex-end"}}>
-          <div>
-            <div style={{fontSize:10,color:C.copper,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>Home Team</div>
-            <select style={{...inp,cursor:"pointer"}} value={homeTeam} onChange={e=>{setHomeTeam(e.target.value);setHomeData(null);setResults(null);}}>
-              <option value="">Select home team...</option>{NBA_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <button className="hov-btn" onClick={()=>fetchTeam(homeTeam,"home")} disabled={!homeTeam||homeLoading} style={{padding:"10px 20px",background:homeTeam&&!homeLoading?"linear-gradient(90deg,"+C.copper+","+C.copperL+")":C.dim,border:"none",borderRadius:8,cursor:homeTeam&&!homeLoading?"pointer":"not-allowed",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,letterSpacing:1.5,color:homeTeam&&!homeLoading?C.black:C.muted,textTransform:"uppercase",whiteSpace:"nowrap"}}>
-            {homeLoading?<span className="pulse">Loading...</span>:"Load Roster"}
-          </button>
-        </div>
-        {homeError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{homeError}</div>}
-      </div>
-      {(homeLoading||homeData)&&<div style={{padding:"0 14px 14px"}}>
-        <RosterPanel teamName={homeTeam} abbr={homeAbbr} teamData={homeData} onCycle={n=>cyclePlayer("home",n)} sport="nba" accent={C.copper} loading={homeLoading}/>
-      </div>}
+      <div style={{padding:14}}><div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"flex-end"}}><div><div style={{fontSize:10,color:C.copper,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>Home Team</div><select style={{...inp,cursor:"pointer"}} value={homeTeam} onChange={e=>{setHomeTeam(e.target.value);setHomeData(null);setResults(null);}}><option value="">Select home team...</option>{NBA_TEAMS.map(t=><option key={t} value={t}>{t}</option>)}</select></div><button className="hov-btn" onClick={()=>fetchTeam(homeTeam,"home")} disabled={!homeTeam||homeLoading} style={{padding:"10px 20px",background:homeTeam&&!homeLoading?"linear-gradient(90deg,"+C.copper+","+C.copperL+")":C.dim,border:"none",borderRadius:8,cursor:homeTeam&&!homeLoading?"pointer":"not-allowed",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,letterSpacing:1.5,color:homeTeam&&!homeLoading?C.black:C.muted,textTransform:"uppercase",whiteSpace:"nowrap"}}>{homeLoading?<span className="pulse">Loading...</span>:"Load Roster"}</button></div>{homeError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{homeError}</div>}</div>
+      {(homeLoading||homeData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={homeTeam} abbr={homeAbbr} teamData={homeData} onCycle={n=>cyclePlayer("home",n)} sport="nba" accent={C.copper} loading={homeLoading}/></div>}
     </div>
-
-    {/* Step 3: Odds + Analyze */}
     {bothLoaded&&<div className="fade-in" style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
       <SectionHeader label="Step 3 - Set Odds & Analyze"/>
-      <div style={{padding:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
-          <div><div style={{fontSize:10,color:C.muted,letterSpacing:1,marginBottom:5,textTransform:"uppercase"}}>Away Moneyline ({awayAbbr})</div><input style={inp} placeholder="+130" value={awayOdds} onChange={e=>setAwayOdds(e.target.value)}/></div>
-          <div><div style={{fontSize:10,color:C.muted,letterSpacing:1,marginBottom:5,textTransform:"uppercase"}}>Home Moneyline ({homeAbbr})</div><input style={inp} placeholder="-150" value={homeOdds} onChange={e=>setHomeOdds(e.target.value)}/></div>
-        </div>
-        <button className="hov-btn" onClick={runModels} disabled={analyzing} style={{width:"100%",padding:"13px 0",background:analyzing?C.dim:"linear-gradient(90deg,"+C.copper+","+C.copperL+")",border:"none",borderRadius:9,cursor:analyzing?"not-allowed":"pointer",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:17,letterSpacing:2,color:analyzing?C.muted:C.black,textTransform:"uppercase"}}>
-          {analyzing?<span className="pulse">Running Models...</span>:"Run Analysis"}
-        </button>
-      </div>
+      <div style={{padding:14}}><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}><div><div style={{fontSize:10,color:C.muted,letterSpacing:1,marginBottom:5,textTransform:"uppercase"}}>Away Moneyline ({awayAbbr})</div><input style={inp} placeholder="+130" value={awayOdds} onChange={e=>setAwayOdds(e.target.value)}/></div><div><div style={{fontSize:10,color:C.muted,letterSpacing:1,marginBottom:5,textTransform:"uppercase"}}>Home Moneyline ({homeAbbr})</div><input style={inp} placeholder="-150" value={homeOdds} onChange={e=>setHomeOdds(e.target.value)}/></div></div><button className="hov-btn" onClick={runModels} disabled={analyzing} style={{width:"100%",padding:"13px 0",background:analyzing?C.dim:"linear-gradient(90deg,"+C.copper+","+C.copperL+")",border:"none",borderRadius:9,cursor:analyzing?"not-allowed":"pointer",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:17,letterSpacing:2,color:analyzing?C.muted:C.black,textTransform:"uppercase"}}>{analyzing?<span className="pulse">Running Models...</span>:"Run Analysis"}</button></div>
     </div>}
-
     {results&&<NBAResults results={results} awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayOdds={awayOdds} homeOdds={homeOdds} tab={tab} setTab={setTab} onRecalc={runModels}/>}
   </div>;
 }
@@ -221,8 +140,7 @@ function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
     <div style={{display:"flex",gap:4,marginBottom:14,background:C.dark,borderRadius:8,padding:4,border:"1px solid "+C.border}}>{[["results","Results"],["method","Methodology"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px 0",borderRadius:6,border:"none",cursor:"pointer",background:tab===k?C.copper+"33":"transparent",color:tab===k?C.copper:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1,textTransform:"uppercase",borderBottom:tab===k?"2px solid "+C.copper:"2px solid transparent"}}>{l}</button>)}</div>
     {tab==="results"&&<>
       <div style={{background:C.card,border:"1.5px solid "+C.copper+"44",borderRadius:12,padding:20,marginBottom:14}}>
-        <SectionHeader label="Consensus - 5 Model Weighted Average"/>
-        <div style={{height:8}}/>
+        <SectionHeader label="Consensus - 5 Model Weighted Average"/><div style={{height:8}}/>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:16,alignItems:"center",marginBottom:16}}>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={awayAbbr} size={52}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:aw>.55?C.teal:aw>.45?C.copper:C.white}}>{(aw*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{awayTeam}</div></div><OddsPill prob={aw}/></div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div>{(aE||hE)&&<div style={{padding:"8px 12px",background:C.black,border:"1px solid "+C.border,borderRadius:8}}><div style={{fontFamily:"'Barlow Condensed'",fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1}}>{sig(parseFloat(aw>cH?aE:hE))}</div></div>}</div>
@@ -250,6 +168,7 @@ function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
   </div>;
 }
 
+// â”€â”€â”€ NHL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const NHL_TEAMS=["Anaheim Ducks","Boston Bruins","Buffalo Sabres","Calgary Flames","Carolina Hurricanes","Chicago Blackhawks","Colorado Avalanche","Columbus Blue Jackets","Dallas Stars","Detroit Red Wings","Edmonton Oilers","Florida Panthers","Los Angeles Kings","Minnesota Wild","Montreal Canadiens","Nashville Predators","New Jersey Devils","New York Islanders","New York Rangers","Ottawa Senators","Philadelphia Flyers","Pittsburgh Penguins","San Jose Sharks","Seattle Kraken","St. Louis Blues","Tampa Bay Lightning","Toronto Maple Leafs","Utah Mammoth","Vancouver Canucks","Vegas Golden Knights","Washington Capitals","Winnipeg Jets"];
 const NHL_ABBR={"Anaheim Ducks":"ANA","Boston Bruins":"BOS","Buffalo Sabres":"BUF","Calgary Flames":"CGY","Carolina Hurricanes":"CAR","Chicago Blackhawks":"CHI","Colorado Avalanche":"COL","Columbus Blue Jackets":"CBJ","Dallas Stars":"DAL","Detroit Red Wings":"DET","Edmonton Oilers":"EDM","Florida Panthers":"FLA","Los Angeles Kings":"LAK","Minnesota Wild":"MIN","Montreal Canadiens":"MTL","Nashville Predators":"NSH","New Jersey Devils":"NJD","New York Islanders":"NYI","New York Rangers":"NYR","Ottawa Senators":"OTT","Philadelphia Flyers":"PHI","Pittsburgh Penguins":"PIT","San Jose Sharks":"SJS","Seattle Kraken":"SEA","St. Louis Blues":"STL","Tampa Bay Lightning":"TBL","Toronto Maple Leafs":"TOR","Utah Mammoth":"UTA","Vancouver Canucks":"VAN","Vegas Golden Knights":"VGK","Washington Capitals":"WSH","Winnipeg Jets":"WPG"};
 
@@ -323,8 +242,260 @@ function NHLResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
   </div>;
 }
 
+// â”€â”€â”€ NCAAM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const NCAAM_TEAMS=[
+  {name:"Duke Blue Devils",id:"150",conf:"ACC"},{name:"North Carolina Tar Heels",id:"153",conf:"ACC"},
+  {name:"Virginia Cavaliers",id:"258",conf:"ACC"},{name:"NC State Wolfpack",id:"152",conf:"ACC"},
+  {name:"Syracuse Orange",id:"183",conf:"ACC"},{name:"Clemson Tigers",id:"228",conf:"ACC"},
+  {name:"Pittsburgh Panthers",id:"221",conf:"ACC"},{name:"Louisville Cardinals",id:"97",conf:"ACC"},
+  {name:"Notre Dame Fighting Irish",id:"87",conf:"ACC"},{name:"Wake Forest Demon Deacons",id:"154",conf:"ACC"},
+  {name:"Georgia Tech Yellow Jackets",id:"59",conf:"ACC"},{name:"Florida State Seminoles",id:"52",conf:"ACC"},
+  {name:"Miami Hurricanes",id:"2390",conf:"ACC"},{name:"Virginia Tech Hokies",id:"259",conf:"ACC"},
+  {name:"Stanford Cardinal",id:"24",conf:"ACC"},{name:"SMU Mustangs",id:"2567",conf:"ACC"},
+  {name:"California Golden Bears",id:"25",conf:"ACC"},{name:"Boston College Eagles",id:"103",conf:"ACC"},
+  {name:"Kansas Jayhawks",id:"2305",conf:"Big 12"},{name:"Baylor Bears",id:"239",conf:"Big 12"},
+  {name:"Houston Cougars",id:"248",conf:"Big 12"},{name:"Iowa State Cyclones",id:"66",conf:"Big 12"},
+  {name:"Texas Tech Red Raiders",id:"2641",conf:"Big 12"},{name:"Kansas State Wildcats",id:"2306",conf:"Big 12"},
+  {name:"Arizona Wildcats",id:"12",conf:"Big 12"},{name:"Arizona State Sun Devils",id:"9",conf:"Big 12"},
+  {name:"BYU Cougars",id:"252",conf:"Big 12"},{name:"UCF Knights",id:"2116",conf:"Big 12"},
+  {name:"Cincinnati Bearcats",id:"2132",conf:"Big 12"},{name:"Colorado Buffaloes",id:"38",conf:"Big 12"},
+  {name:"Utah Utes",id:"254",conf:"Big 12"},{name:"West Virginia Mountaineers",id:"277",conf:"Big 12"},
+  {name:"Oklahoma State Cowboys",id:"197",conf:"Big 12"},{name:"TCU Horned Frogs",id:"2628",conf:"Big 12"},
+  {name:"UConn Huskies",id:"41",conf:"Big East"},{name:"Marquette Golden Eagles",id:"269",conf:"Big East"},
+  {name:"St. John's Red Storm",id:"2599",conf:"Big East"},{name:"Creighton Bluejays",id:"156",conf:"Big East"},
+  {name:"Villanova Wildcats",id:"222",conf:"Big East"},{name:"Xavier Musketeers",id:"2752",conf:"Big East"},
+  {name:"Providence Friars",id:"2507",conf:"Big East"},{name:"Seton Hall Pirates",id:"2550",conf:"Big East"},
+  {name:"Butler Bulldogs",id:"2086",conf:"Big East"},{name:"Georgetown Hoyas",id:"46",conf:"Big East"},
+  {name:"DePaul Blue Demons",id:"305",conf:"Big East"},
+  {name:"Michigan State Spartans",id:"127",conf:"Big Ten"},{name:"Purdue Boilermakers",id:"2509",conf:"Big Ten"},
+  {name:"Illinois Fighting Illini",id:"356",conf:"Big Ten"},{name:"Wisconsin Badgers",id:"275",conf:"Big Ten"},
+  {name:"Maryland Terrapins",id:"120",conf:"Big Ten"},{name:"Ohio State Buckeyes",id:"194",conf:"Big Ten"},
+  {name:"UCLA Bruins",id:"26",conf:"Big Ten"},{name:"Indiana Hoosiers",id:"84",conf:"Big Ten"},
+  {name:"Michigan Wolverines",id:"130",conf:"Big Ten"},{name:"Penn State Nittany Lions",id:"213",conf:"Big Ten"},
+  {name:"Iowa Hawkeyes",id:"2294",conf:"Big Ten"},{name:"Rutgers Scarlet Knights",id:"164",conf:"Big Ten"},
+  {name:"Northwestern Wildcats",id:"77",conf:"Big Ten"},{name:"Minnesota Golden Gophers",id:"135",conf:"Big Ten"},
+  {name:"Nebraska Cornhuskers",id:"158",conf:"Big Ten"},{name:"Oregon Ducks",id:"2483",conf:"Big Ten"},
+  {name:"USC Trojans",id:"30",conf:"Big Ten"},{name:"Washington Huskies",id:"264",conf:"Big Ten"},
+  {name:"Kentucky Wildcats",id:"96",conf:"SEC"},{name:"Tennessee Volunteers",id:"2633",conf:"SEC"},
+  {name:"Auburn Tigers",id:"2",conf:"SEC"},{name:"Florida Gators",id:"57",conf:"SEC"},
+  {name:"Alabama Crimson Tide",id:"333",conf:"SEC"},{name:"Arkansas Razorbacks",id:"8",conf:"SEC"},
+  {name:"LSU Tigers",id:"99",conf:"SEC"},{name:"Texas A&M Aggies",id:"245",conf:"SEC"},
+  {name:"Mississippi State Bulldogs",id:"344",conf:"SEC"},{name:"Ole Miss Rebels",id:"145",conf:"SEC"},
+  {name:"Missouri Tigers",id:"142",conf:"SEC"},{name:"South Carolina Gamecocks",id:"2579",conf:"SEC"},
+  {name:"Vanderbilt Commodores",id:"238",conf:"SEC"},{name:"Georgia Bulldogs",id:"61",conf:"SEC"},
+  {name:"Texas Longhorns",id:"251",conf:"SEC"},{name:"Oklahoma Sooners",id:"201",conf:"SEC"},
+  {name:"Gonzaga Bulldogs",id:"2250",conf:"WCC"},{name:"San Diego State Aztecs",id:"21",conf:"MWC"},
+  {name:"New Mexico Lobos",id:"167",conf:"MWC"},{name:"Boise State Broncos",id:"68",conf:"MWC"},
+  {name:"Utah State Aggies",id:"328",conf:"MWC"},{name:"Colorado State Rams",id:"36",conf:"MWC"},
+  {name:"Memphis Tigers",id:"235",conf:"American"},{name:"Florida Atlantic Owls",id:"2226",conf:"American"},
+  {name:"Wichita State Shockers",id:"2724",conf:"American"},{name:"UAB Blazers",id:"5",conf:"American"},
+  {name:"Dayton Flyers",id:"2168",conf:"A-10"},{name:"VCU Rams",id:"2670",conf:"A-10"},
+  {name:"Saint Louis Billikens",id:"139",conf:"A-10"},{name:"Davidson Wildcats",id:"2166",conf:"A-10"},
+  {name:"Rhode Island Rams",id:"227",conf:"A-10"},{name:"Loyola Chicago Ramblers",id:"2350",conf:"A-10"},
+  {name:"Richmond Spiders",id:"257",conf:"A-10"},{name:"Saint Joseph's Hawks",id:"2603",conf:"A-10"},
+].sort((a,b)=>a.name.localeCompare(b.name));
+
+function ncaamMdlKenPom(h,a){
+  // KenPom: adjusted efficiency margin drives win prob, +3.5pt HCA in college
+  const hAdj=(h.ppg-h.opp)+Math.max(0,(200-h.kenpom_rank)*0.04);
+  const aAdj=(a.ppg-a.opp)+Math.max(0,(200-a.kenpom_rank)*0.04);
+  const inj=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.role==="STAR"?.10:p.role==="KEY"?.05:.02),0);
+  const p=logistic((hAdj-aAdj)*0.09+3.5*0.09-(inj(h.roster)-inj(a.roster))*1.5);
+  return{homeProb:Math.min(.97,Math.max(.03,p)),hAdj:hAdj.toFixed(1),aAdj:aAdj.toFixed(1)};}
+
+function ncaamMdlBPI(h,a){
+  // ESPN BPI-style: win% Elo with +90pt home court (college has bigger HCA)
+  const hw=h.wins/Math.max(h.wins+h.losses,1),aw=a.wins/Math.max(a.wins+a.losses,1);
+  const hE=1500+350*Math.log10(Math.max(hw,.01)/Math.max(1-hw,.01));
+  const aE=1500+350*Math.log10(Math.max(aw,.01)/Math.max(1-aw,.01));
+  const p=1/(1+Math.pow(10,(aE-((hE)+90))/350));
+  return{homeProb:Math.min(.97,Math.max(.03,p)),hBPI:Math.round(hE),aBPI:Math.round(aE)};}
+
+function ncaamMdlFourFactors(h,a){
+  // Four Factors tuned for college (higher TOV/OREB rates than NBA)
+  const ff=d=>(d.efg_pct||.50)*.40+(1-(d.tov_rate||17)/38)*.25+(d.oreb_pct||.30)*.20+(d.ft_rate||.35)*.15;
+  const inj=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.role==="STAR"?.08:p.role==="KEY"?.04:.015),0);
+  const hFF=ff(h),aFF=ff(a);
+  const p=logistic((hFF-aFF)*5+(h.ppg-h.opp-(a.ppg-a.opp))*0.07+3.5*0.07-inj(h.roster)+inj(a.roster));
+  return{homeProb:Math.min(.97,Math.max(.03,p)),hFF:hFF.toFixed(3),aFF:aFF.toFixed(3)};}
+
+function ncaamMdlTempo(h,a){
+  // Tempo-adjusted scoring: pace matters more in college
+  const avgTempo=(h.tempo+a.tempo)/2;
+  const hPoss=h.ppg/Math.max(h.tempo,55)*avgTempo;
+  const aPoss=a.ppg/Math.max(a.tempo,55)*avgTempo;
+  const hDef=h.opp/Math.max(h.tempo,55)*avgTempo;
+  const aDef=a.opp/Math.max(a.tempo,55)*avgTempo;
+  const inj=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.role==="STAR"?.10:p.role==="KEY"?.05:.02),0);
+  const hScore=hPoss-aDef,aScore=aPoss-hDef;
+  const p=logistic((hScore-aScore)*0.09+3.5*0.09-(inj(h.roster)-inj(a.roster))*1.2);
+  return{homeProb:Math.min(.97,Math.max(.03,p)),hPace:h.tempo.toFixed(0),aPace:a.tempo.toFixed(0),hScore:hScore.toFixed(1),aScore:aScore.toFixed(1)};}
+
+function ncaamMdlMonteCarlo(h,a,N=8000){
+  const inj=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.role==="STAR"?.12:p.role==="KEY"?.06:.02),0);
+  const hExp=((h.ppg-inj(h.roster)*2)+(100-(a.opp-inj(a.roster)*2)))/2+1.8;
+  const aExp=((a.ppg-inj(a.roster)*2)+(100-(h.opp-inj(h.roster)*2)))/2;
+  let w=0;
+  for(let i=0;i<N;i++){
+    const z1=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
+    const z2=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
+    if(hExp+z1*10>aExp+z2*10)w++;}
+  return{homeProb:Math.min(.97,Math.max(.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1)};}
+
+function ncaamConsensus(ps){return Math.min(.97,Math.max(.03,[.22,.20,.22,.20,.16].reduce((s,w,i)=>s+ps[i]*w,0)));}
+
+function NCAAMPage(){
+  const [awayTeam,setAwayTeam]=useState(null);
+  const [homeTeam,setHomeTeam]=useState(null);
+  const [awayOdds,setAwayOdds]=useState("");
+  const [homeOdds,setHomeOdds]=useState("");
+  const [awayData,setAwayData]=useState(null);
+  const [homeData,setHomeData]=useState(null);
+  const [awayLoading,setAwayLoading]=useState(false);
+  const [homeLoading,setHomeLoading]=useState(false);
+  const [awayError,setAwayError]=useState("");
+  const [homeError,setHomeError]=useState("");
+  const [results,setResults]=useState(null);
+  const [tab,setTab]=useState("results");
+  const [analyzing,setAnalyzing]=useState(false);
+
+  const fetchTeam=async(t,side)=>{
+    const setL=side==="away"?setAwayLoading:setHomeLoading;
+    const setD=side==="away"?setAwayData:setHomeData;
+    const setE=side==="away"?setAwayError:setHomeError;
+    setL(true);setD(null);setE("");setResults(null);
+    try{
+      const r=await fetch("/api/ncaam",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({teamId:t.id,team:t.name})});
+      const d=await r.json();
+      if(!r.ok)throw new Error(d.error||"Error "+r.status);
+      setD(d);
+    }catch(e){setE(e.message);}
+    setL(false);
+  };
+
+  const cyclePlayer=(side,name)=>{
+    const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];
+    if(!g)return;
+    s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});
+  };
+
+  const runModels=()=>{
+    if(!homeData||!awayData)return;
+    setAnalyzing(true);
+    setTimeout(()=>{
+      const kp=ncaamMdlKenPom(homeData,awayData),bpi=ncaamMdlBPI(homeData,awayData),ff=ncaamMdlFourFactors(homeData,awayData),tp=ncaamMdlTempo(homeData,awayData),mc=ncaamMdlMonteCarlo(homeData,awayData);
+      setResults({kp,bpi,ff,tp,mc,cons:ncaamConsensus([kp.homeProb,bpi.homeProb,ff.homeProb,tp.homeProb,mc.homeProb])});
+      setTab("results");setAnalyzing(false);
+    },50);
+  };
+
+  const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
+  const bothLoaded=awayData&&homeData;
+  const awayAbbr=awayTeam?awayTeam.name.split(" ").slice(-1)[0].slice(0,4).toUpperCase():"AWY";
+  const homeAbbr=homeTeam?homeTeam.name.split(" ").slice(-1)[0].slice(0,4).toUpperCase():"HME";
+
+  return <div style={{display:"flex",flexDirection:"column",gap:14}}>
+    {/* Away */}
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+      <SectionHeader label="Step 1 - Select Away Team" accent={C.amber} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.amber}/>}/>
+      <div style={{padding:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"flex-end"}}>
+          <div>
+            <div style={{fontSize:10,color:C.amber,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>Away Team</div>
+            <select style={{...inp,cursor:"pointer"}} value={awayTeam?.id||""} onChange={e=>{const t=NCAAM_TEAMS.find(x=>x.id===e.target.value)||null;setAwayTeam(t);setAwayData(null);setResults(null);}}>
+              <option value="">Select away team...</option>
+              {NCAAM_TEAMS.map(t=><option key={t.id} value={t.id}>{t.name} ({t.conf})</option>)}
+            </select>
+          </div>
+          <button className="hov-btn" onClick={()=>fetchTeam(awayTeam,"away")} disabled={!awayTeam||awayLoading} style={{padding:"10px 20px",background:awayTeam&&!awayLoading?"linear-gradient(90deg,"+C.amberD+","+C.amber+")":C.dim,border:"none",borderRadius:8,cursor:awayTeam&&!awayLoading?"pointer":"not-allowed",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,letterSpacing:1.5,color:awayTeam&&!awayLoading?C.black:C.muted,textTransform:"uppercase",whiteSpace:"nowrap"}}>
+            {awayLoading?<span className="pulse">Loading...</span>:"Load Roster"}
+          </button>
+        </div>
+        {awayError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{awayError}</div>}
+      </div>
+      {(awayLoading||awayData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={awayTeam?.name||""} abbr={awayAbbr} teamData={awayData} onCycle={n=>cyclePlayer("away",n)} sport="ncaam" accent={C.amber} loading={awayLoading}/></div>}
+    </div>
+
+    {/* Home */}
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+      <SectionHeader label="Step 2 - Select Home Team" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
+      <div style={{padding:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"flex-end"}}>
+          <div>
+            <div style={{fontSize:10,color:C.copper,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>Home Team</div>
+            <select style={{...inp,cursor:"pointer"}} value={homeTeam?.id||""} onChange={e=>{const t=NCAAM_TEAMS.find(x=>x.id===e.target.value)||null;setHomeTeam(t);setHomeData(null);setResults(null);}}>
+              <option value="">Select home team...</option>
+              {NCAAM_TEAMS.map(t=><option key={t.id} value={t.id}>{t.name} ({t.conf})</option>)}
+            </select>
+          </div>
+          <button className="hov-btn" onClick={()=>fetchTeam(homeTeam,"home")} disabled={!homeTeam||homeLoading} style={{padding:"10px 20px",background:homeTeam&&!homeLoading?"linear-gradient(90deg,"+C.copper+","+C.copperL+")":C.dim,border:"none",borderRadius:8,cursor:homeTeam&&!homeLoading?"pointer":"not-allowed",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,letterSpacing:1.5,color:homeTeam&&!homeLoading?C.black:C.muted,textTransform:"uppercase",whiteSpace:"nowrap"}}>
+            {homeLoading?<span className="pulse">Loading...</span>:"Load Roster"}
+          </button>
+        </div>
+        {homeError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{homeError}</div>}
+      </div>
+      {(homeLoading||homeData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={homeTeam?.name||""} abbr={homeAbbr} teamData={homeData} onCycle={n=>cyclePlayer("home",n)} sport="ncaam" accent={C.copper} loading={homeLoading}/></div>}
+    </div>
+
+    {bothLoaded&&<div className="fade-in" style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+      <SectionHeader label="Step 3 - Set Odds & Analyze" accent={C.amber}/>
+      <div style={{padding:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+          <div><div style={{fontSize:10,color:C.muted,letterSpacing:1,marginBottom:5,textTransform:"uppercase"}}>Away Moneyline ({awayAbbr})</div><input style={inp} placeholder="+130" value={awayOdds} onChange={e=>setAwayOdds(e.target.value)}/></div>
+          <div><div style={{fontSize:10,color:C.muted,letterSpacing:1,marginBottom:5,textTransform:"uppercase"}}>Home Moneyline ({homeAbbr})</div><input style={inp} placeholder="-150" value={homeOdds} onChange={e=>setHomeOdds(e.target.value)}/></div>
+        </div>
+        <button className="hov-btn" onClick={runModels} disabled={analyzing} style={{width:"100%",padding:"13px 0",background:analyzing?C.dim:"linear-gradient(90deg,"+C.amberD+","+C.amber+")",border:"none",borderRadius:9,cursor:analyzing?"not-allowed":"pointer",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:17,letterSpacing:2,color:analyzing?C.muted:C.black,textTransform:"uppercase"}}>
+          {analyzing?<span className="pulse">Running Models...</span>:"Run Analysis"}
+        </button>
+      </div>
+    </div>}
+
+    {results&&<NCAAMResults results={results} awayTeam={awayTeam?.name||""} homeTeam={homeTeam?.name||""} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayOdds={awayOdds} homeOdds={homeOdds} tab={tab} setTab={setTab} onRecalc={runModels}/>}
+  </div>;
+}
+
+function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOdds,tab,setTab,onRecalc}){
+  const {kp,bpi,ff,tp,mc,cons}=results;const cH=cons,aw=1-cH;
+  const hI=oddsToImplied(homeOdds),aI=oddsToImplied(awayOdds);
+  const hE=hI!==null?((cH-hI)*100).toFixed(1):null,aE=aI!==null?((aw-aI)*100).toFixed(1):null;
+  const hEV=homeOdds&&hI?calcEV(cH,homeOdds):null,aEV=awayOdds&&aI?calcEV(aw,awayOdds):null;
+  return <div className="fade-in">
+    <div style={{display:"flex",gap:4,marginBottom:14,background:C.dark,borderRadius:8,padding:4,border:"1px solid "+C.border}}>{[["results","Results"],["method","Methodology"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px 0",borderRadius:6,border:"none",cursor:"pointer",background:tab===k?C.amber+"22":"transparent",color:tab===k?C.amber:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1,textTransform:"uppercase",borderBottom:tab===k?"2px solid "+C.amber:"2px solid transparent"}}>{l}</button>)}</div>
+    {tab==="results"&&<>
+      <div style={{background:C.card,border:"1.5px solid "+C.amber+"44",borderRadius:12,padding:20,marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}><div style={{width:3,height:16,borderRadius:2,background:C.amber}}/><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1.5,color:C.white,textTransform:"uppercase"}}>Consensus - 5 College Basketball Models</span></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:16,alignItems:"center",marginBottom:16}}>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={awayAbbr} size={52} accent={C.amber}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:aw>.55?C.amber:aw>.45?C.copper:C.white}}>{(aw*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{awayTeam}</div></div><OddsPill prob={aw} accent={C.amber}/></div>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={homeAbbr} size={52} accent={C.amber}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:cH>.55?C.amber:cH>.45?C.copper:C.white}}>{(cH*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{homeTeam}</div></div><OddsPill prob={cH} accent={C.amber}/></div>
+        </div>
+        <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr} accent={C.amber}/>
+        {(aE||hE)&&<div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>{aE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(aE)>=2?C.amber+"18":C.black,border:"1px solid "+(parseFloat(aE)>=2?C.amber:C.border),fontSize:11,color:parseFloat(aE)>=2?C.amber:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{awayAbbr} Edge: {parseFloat(aE)>=0?"+":""}{aE}%{aEV?" - EV "+(parseFloat(aEV)>=0?"+":"")+aEV+"/$1":""}</div>}{hE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(hE)>=2?C.amber+"18":C.black,border:"1px solid "+(parseFloat(hE)>=2?C.amber:C.border),fontSize:11,color:parseFloat(hE)>=2?C.amber:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{homeAbbr} Edge: {parseFloat(hE)>=0?"+":""}{hE}%{hEV?" - EV "+(parseFloat(hEV)>=0?"+":"")+hEV+"/$1":""}</div>}</div>}
+        <button className="hov-btn" onClick={onRecalc} style={{marginTop:12,width:"100%",padding:"9px 0",background:"transparent",border:"1px solid "+C.border,borderRadius:7,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.muted,textTransform:"uppercase"}}>Recalculate with Updated Injuries</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        <ModelCard icon="KP" name="KenPom" desc="Adjusted efficiency margin + KenPom rank" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-kp.homeProb} detail={"Away adj: "+kp.aAdj+"  Home adj: "+kp.hAdj+"  +3.5pt HCA"} accent={C.amber}/>
+        <ModelCard icon="BPI" name="ESPN BPI" desc="Win% Elo + scoring margin + home court" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-bpi.homeProb} detail={"Away BPI: "+bpi.aBPI+"  Home BPI: "+bpi.hBPI+"  +90 HCA"} accent={C.amber}/>
+        <ModelCard icon="4F" name="Four Factors" desc="eFG%, TOV%, OREB%, FTR â€” college adjusted" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={"Away FF: "+ff.aFF+"  Home FF: "+ff.hFF} accent={C.amber}/>
+        <ModelCard icon="TPO" name="Tempo Analysis" desc="Pace-adjusted scoring + possession efficiency" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-tp.homeProb} detail={"Away pace: "+tp.aPace+" proj: "+tp.aScore+"  Home pace: "+tp.hPace+" proj: "+tp.hScore} accent={C.amber}/>
+      </div>
+      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games â€” injury adjusted" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={"Proj: "+awayTeam.split(" ").at(-1)+" "+mc.aExp+"  "+homeTeam.split(" ").at(-1)+" "+mc.hExp+" pts"} accent={C.amber}/>
+      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
+        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.amber,textTransform:"uppercase",marginBottom:10}}>Model Agreement</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
+          {[{l:"KenPom",p:1-kp.homeProb},{l:"BPI",p:1-bpi.homeProb},{l:"4 Factors",p:1-ff.homeProb},{l:"Tempo",p:1-tp.homeProb},{l:"Monte Carlo",p:1-mc.homeProb}].map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+C.amber+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.amber}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:C.amber,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}
+        </div>
+      </div>
+    </>}
+    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["KP","KenPom (22%)","Adjusted efficiency margin + KenPom rank boost. +3.5pt HCA. Stronger than NBA home edge."],["BPI","ESPN BPI (20%)","Win% Elo system. College has larger home advantage (+90 Elo) than NBA (+100 pts but different scale)."],["4F","Four Factors (22%)","eFG%(40%) + TOV(25%) + OREB(20%) + FTR(15%). College rates calibrated: higher TOV/OREB typical."],["TPO","Tempo Analysis (20%)","Pace-normalizes scoring to account for teams playing at vastly different speeds. Key differentiator in college."],["MC","Monte Carlo (16%)","8,000 simulated games. Normal scoring distribution. Player injuries modeled via PER reduction."],["W","Consensus","KenPom x22% + BPI x20% + 4F x22% + Tempo x20% + MC x16%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.amber+"22",border:"1px solid "+C.amber+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.amber,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.amber,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
+  </div>;
+}
+
+// â”€â”€â”€ APP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function App(){
   const [sport,setSport]=useState("nba");
+  const TABS=[{id:"nba",label:"NBA",accent:C.teal,sub:"5-model system - Elo - RAPTOR - Four Factors - ML/BPI - Monte Carlo"},{id:"nhl",label:"NHL",accent:C.ice,sub:"5-model system - Elo - Goalie - Special Teams - Corsi - Monte Carlo"},{id:"ncaam",label:"NCAAM",accent:C.amber,sub:"5-model system - KenPom - BPI - Four Factors - Tempo - Monte Carlo"}];
+  const ct=TABS.find(t=>t.id===sport);
   return <div style={{minHeight:"100vh",background:C.black,fontFamily:"'Barlow',sans-serif",color:C.white}}>
     <style>{STYLES}</style>
     <div style={{background:C.dark,borderBottom:"1px solid "+C.border}}>
@@ -335,7 +506,7 @@ export default function App(){
             <div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:C.white,letterSpacing:1,lineHeight:1}}>COURT EDGE</div><div style={{fontSize:9,color:C.copper,letterSpacing:2,textTransform:"uppercase"}}>Sports Analytics</div></div>
           </div>
           <div style={{display:"flex",gap:2,marginLeft:16,background:C.black,borderRadius:8,padding:3,border:"1px solid "+C.border}}>
-            {[{id:"nba",label:"NBA",accent:C.teal},{id:"nhl",label:"NHL",accent:C.ice}].map(item=><button key={item.id} onClick={()=>setSport(item.id)} style={{padding:"7px 20px",borderRadius:6,border:"none",cursor:"pointer",background:sport===item.id?"linear-gradient(135deg,"+item.accent+"22,"+item.accent+"11)":"transparent",color:sport===item.id?item.accent:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1,borderBottom:sport===item.id?"2px solid "+item.accent:"2px solid transparent",transition:"all .2s ease"}}>{item.label}</button>)}
+            {TABS.map(item=><button key={item.id} onClick={()=>setSport(item.id)} style={{padding:"7px 16px",borderRadius:6,border:"none",cursor:"pointer",background:sport===item.id?"linear-gradient(135deg,"+item.accent+"22,"+item.accent+"11)":"transparent",color:sport===item.id?item.accent:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1,borderBottom:sport===item.id?"2px solid "+item.accent:"2px solid transparent",transition:"all .2s ease"}}>{item.label}</button>)}
           </div>
           <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
             <div style={{padding:"5px 12px",borderRadius:20,background:"linear-gradient(90deg,"+C.copper+","+C.copperL+")",fontSize:11,fontWeight:700,color:C.black,fontFamily:"'Barlow Condensed'",letterSpacing:1}}>2025-26 LIVE</div>
@@ -344,15 +515,16 @@ export default function App(){
         </div>
       </div>
     </div>
-    <div style={{background:sport==="nba"?"linear-gradient(90deg,"+C.teal+"18,transparent)":"linear-gradient(90deg,"+C.ice+"18,transparent)",borderBottom:"1px solid "+C.border,padding:"8px 16px"}}>
+    <div style={{background:"linear-gradient(90deg,"+ct.accent+"18,transparent)",borderBottom:"1px solid "+C.border,padding:"8px 16px"}}>
       <div style={{maxWidth:1040,margin:"0 auto",display:"flex",alignItems:"center",gap:10}}>
-        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:18,color:sport==="nba"?C.teal:C.ice,letterSpacing:2}}>{sport==="nba"?"NBA MONEYLINE ANALYZER":"NHL MONEYLINE ANALYZER"}</span>
-        <span style={{fontSize:11,color:C.muted}}>{sport==="nba"?"5-model system - Elo - RAPTOR - Four Factors - ML/BPI - Monte Carlo":"5-model system - Elo - Goalie - Special Teams - Corsi - Monte Carlo"}</span>
+        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:18,color:ct.accent,letterSpacing:2}}>{ct.label==="NBA"?"NBA MONEYLINE ANALYZER":ct.label==="NHL"?"NHL MONEYLINE ANALYZER":"NCAAM MONEYLINE ANALYZER"}</span>
+        <span style={{fontSize:11,color:C.muted}}>{ct.sub}</span>
       </div>
     </div>
     <div style={{maxWidth:1040,margin:"0 auto",padding:"16px"}}>
       {sport==="nba"&&<NBAPage/>}
       {sport==="nhl"&&<NHLPage/>}
+      {sport==="ncaam"&&<NCAAMPage/>}
       <div style={{fontSize:10,color:C.dim,textAlign:"center",padding:"16px 0 8px"}}>For informational and entertainment purposes only - Not financial advice - Gamble responsibly</div>
     </div>
   </div>;

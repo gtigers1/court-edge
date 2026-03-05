@@ -39,8 +39,12 @@ export default async function handler(req, res) {
     let hSplit = null, aSplit = null;
     let teamElo = 1500;
     let teamGames = [];
+    let injuryMap = {};
     try {
-      const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/schedule`);
+      const [schedResp, injResp] = await Promise.all([
+        fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/schedule`),
+        fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/injuries`)
+      ]);
       const schedJson = await schedResp.json();
       const completed = (schedJson?.events || []).filter(e => e.competitions?.[0]?.status?.type?.completed === true);
 
@@ -83,6 +87,27 @@ export default async function handler(req, res) {
       }
       if (hCnt >= 8) hSplit = { sf: hSF / hCnt, ag: hAG / hCnt };
       if (aCnt >= 8) aSplit = { sf: aSF / aCnt, ag: aAG / aCnt };
+
+      // Build injury map from ESPN injury endpoint
+      try {
+        const injJson = await injResp.json();
+        const normN = s => (s||"").toLowerCase().replace(/[^a-z]/g,"");
+        const mapStatus = s => {
+          if (!s) return null;
+          const sl = s.toLowerCase();
+          if (sl.includes("day-to-day")) return "QUESTIONABLE";
+          if (sl === "out" || sl.includes("injured reserve") || sl.includes("suspension")) return "OUT";
+          return null;
+        };
+        for (const teamEntry of (injJson.injuries || [])) {
+          for (const inj of (teamEntry.injuries || [])) {
+            const mapped = mapStatus(inj.status);
+            if (mapped && inj.athlete?.displayName) {
+              injuryMap[normN(inj.athlete.displayName)] = mapped;
+            }
+          }
+        }
+      } catch(_) {}
     } catch(_) {}
 
     // Step 3: Extract players from ESPN roster API
@@ -202,8 +227,9 @@ export default async function handler(req, res) {
       // Home/away goal splits
       if (hSplit) { parsed.home_gf=parseFloat(hSplit.sf.toFixed(2)); parsed.home_ga=parseFloat(hSplit.ag.toFixed(2)); }
       if (aSplit) { parsed.away_gf=parseFloat(aSplit.sf.toFixed(2)); parsed.away_ga=parseFloat(aSplit.ag.toFixed(2)); }
-      parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",goals:p.goals??0,assists:p.assists??0,points:p.points??0,plus_minus:p.plus_minus??0,position:p.position||"F",role:p.role||"ROLE",status:"PLAYING"}));
-      if(parsed.goalie){parsed.goalie.status="PLAYING";}
+      const normN = s => (s||"").toLowerCase().replace(/[^a-z]/g,"");
+      parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",goals:p.goals??0,assists:p.assists??0,points:p.points??0,plus_minus:p.plus_minus??0,position:p.position||"F",role:p.role||"ROLE",status:injuryMap[normN(p.name||"")]||"PLAYING"}));
+      if(parsed.goalie){parsed.goalie.status=injuryMap[normN(parsed.goalie.name||"")]||"PLAYING";}
     } else {
       parsed.wins=parsed.wins||wins; parsed.losses=parsed.losses||losses;
       parsed.ppg=parsed.ppg||112; parsed.opp=parsed.opp||112;
@@ -217,7 +243,8 @@ export default async function handler(req, res) {
       // Home/away scoring splits
       if (hSplit) { parsed.home_ppg=parseFloat(hSplit.sf.toFixed(1)); parsed.home_opp=parseFloat(hSplit.ag.toFixed(1)); }
       if (aSplit) { parsed.away_ppg=parseFloat(aSplit.sf.toFixed(1)); parsed.away_opp=parseFloat(aSplit.ag.toFixed(1)); }
-      parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",ppg:p.ppg||10,rpg:p.rpg||3,apg:p.apg||1,per:p.per||((p.ppg||10)*0.9+(p.rpg||3)*0.3+(p.apg||1)*0.5),role:p.role||"ROLE",status:"PLAYING"}));
+      const normN = s => (s||"").toLowerCase().replace(/[^a-z]/g,"");
+      parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",ppg:p.ppg||10,rpg:p.rpg||3,apg:p.apg||1,per:p.per||((p.ppg||10)*0.9+(p.rpg||3)*0.3+(p.apg||1)*0.5),role:p.role||"ROLE",status:injuryMap[normN(p.name||"")]||"PLAYING"}));
     }
     return res.status(200).json(parsed);
   } catch (err) {

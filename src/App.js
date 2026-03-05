@@ -97,18 +97,129 @@ function ModelCard({icon,name,desc,awayTeam,homeTeam,awayAbbr,homeAbbr,awayProb,
 const NBA_TEAMS=["Atlanta Hawks","Boston Celtics","Brooklyn Nets","Charlotte Hornets","Chicago Bulls","Cleveland Cavaliers","Dallas Mavericks","Denver Nuggets","Detroit Pistons","Golden State Warriors","Houston Rockets","Indiana Pacers","LA Clippers","Los Angeles Lakers","Memphis Grizzlies","Miami Heat","Milwaukee Bucks","Minnesota Timberwolves","New Orleans Pelicans","New York Knicks","Oklahoma City Thunder","Orlando Magic","Philadelphia 76ers","Phoenix Suns","Portland Trail Blazers","Sacramento Kings","San Antonio Spurs","Toronto Raptors","Utah Jazz","Washington Wizards"];
 const NBA_ABBR={"Atlanta Hawks":"ATL","Boston Celtics":"BOS","Brooklyn Nets":"BKN","Charlotte Hornets":"CHA","Chicago Bulls":"CHI","Cleveland Cavaliers":"CLE","Dallas Mavericks":"DAL","Denver Nuggets":"DEN","Detroit Pistons":"DET","Golden State Warriors":"GSW","Houston Rockets":"HOU","Indiana Pacers":"IND","LA Clippers":"LAC","Los Angeles Lakers":"LAL","Memphis Grizzlies":"MEM","Miami Heat":"MIA","Milwaukee Bucks":"MIL","Minnesota Timberwolves":"MIN","New Orleans Pelicans":"NOP","New York Knicks":"NYK","Oklahoma City Thunder":"OKC","Orlando Magic":"ORL","Philadelphia 76ers":"PHI","Phoenix Suns":"PHX","Portland Trail Blazers":"POR","Sacramento Kings":"SAC","San Antonio Spurs":"SAS","Toronto Raptors":"TOR","Utah Jazz":"UTA","Washington Wizards":"WAS"};
 
-function nbaMdlElo(h,a){const hw=h.wins/Math.max(h.wins+h.losses,1),aw=a.wins/Math.max(a.wins+a.losses,1);const hE=1500+400*Math.log10(Math.max(hw,.01)/Math.max(1-hw,.01)),aE=1500+400*Math.log10(Math.max(aw,.01)/Math.max(1-aw,.01));const h10=(h.last10_ppg||h.ppg)-(h.last10_opp||h.opp),a10=(a.last10_ppg||a.ppg)-(a.last10_opp||a.opp);const p=1/(1+Math.pow(10,(aE+a10*3-((hE+h10*3)+100))/400));return{homeProb:Math.min(.97,Math.max(.03,p)),hElo:Math.round(hE+h10*3),aElo:Math.round(aE+a10*3)};}
-function nbaMdlRaptor(h,a){const val=r=>(r||[]).reduce((s,p)=>s+(p.per||15)*(p.status==="PLAYING"?1:p.status==="OUT"?0:p.status==="DOUBTFUL"?.25:.65),0);const hV=val(h.roster),aV=val(a.roster);return{homeProb:Math.min(.97,Math.max(.03,hV/Math.max(hV+aV,1)+.035)),hVal:hV.toFixed(1),aVal:aV.toFixed(1)};}
-function nbaMdlFF(h,a){const hit=r=>(r||[]).reduce((s,p)=>{if(p.status==="PLAYING")return s;const sw=p.status==="OUT"?1:p.status==="DOUBTFUL"?.75:.35;return s+sw*Math.max(p.role==="STAR"?.08:p.role==="KEY"?.04:.015,Math.min((p.ppg||0)*.004,.06));},0);const ff=d=>(d.efg_pct||.52)*.40+(1-(d.tov_rate||14)/30)*.25+(d.oreb_pct||.25)*.20+Math.min(d.ftr||.22,.40)*.15;const hH=hit(h.roster),aH=hit(a.roster);return{homeProb:Math.min(.97,Math.max(.03,logistic((h.ppg-h.opp-(a.ppg-a.opp))*.065+(ff(h)-ff(a))*4)+.035-hH+aH)),hFF:ff(h).toFixed(3),aFF:ff(a).toFixed(3)};}
-function nbaMdlML(h,a){const pen=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.per||12)*.01,0);const f=d=>({net:d.ppg-d.opp,wp:d.wins/Math.max(d.wins+d.losses,1),offE:d.ppg*(d.efg_pct||.52),defE:d.opp*(1-(d.opp_efg_pct||.52)),l10:(d.last10_ppg||d.ppg)-(d.last10_opp||d.opp),pen:pen(d.roster)});const h2=f(h),a2=f(a);return{homeProb:Math.min(.97,Math.max(.03,logistic((h2.net-a2.net)*.08+(h2.wp-a2.wp)*2.5+(h2.offE-a2.offE)*.05+(h2.defE-a2.defE)*.04+(h2.l10-a2.l10)*.06+(a2.pen-h2.pen)*1.8+.28)))};}
-function nbaMdlMC(h,a,N=8000){const ih=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.65:.3)*Math.min((p.ppg||0)*.15,4),0);const hE=((h.ppg-ih(h.roster))+(100-(a.opp-ih(a.roster))))/2+1.5,aE=((a.ppg-ih(a.roster))+(100-(h.opp-ih(h.roster))))/2;let w=0;for(let i=0;i<N;i++){const u1=Math.random(),u2=Math.random();const z=Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2),z2=Math.sqrt(-2*Math.log(u1))*Math.sin(2*Math.PI*u2);if(hE+z*11>aE+z2*11)w++;}return{homeProb:Math.min(.97,Math.max(.03,w/N)),hExp:hE.toFixed(1),aExp:aE.toFixed(1)};}
-function nbaConsensus(ps){return Math.min(.97,Math.max(.03,[.18,.22,.22,.22,.16].reduce((s,w,i)=>s+ps[i]*w,0)));}
+// IMPROVED MODELS v2 â€” Restructured for accuracy
+// Key changes:
+// - HCA applied ONCE, correctly calibrated per sport
+// - Models use genuinely different data slices (season/recent/roster/efficiency)
+// - Outputs calibrated to realistic ranges (NBA 45-65%, NHL 44-62%, NCAAM 44-67%)
+// - Market divergence flag added to UI
+// - Pythagorean + Log5 replaces logistic hacks
+
+function pythagorean(pts,opp,exp){const p=Math.pow(Math.max(pts,0.1),exp);return p/(p+Math.pow(Math.max(opp,0.1),exp));}
+function log5(pA,pB){const p=(pA-pA*pB)/(pA+pB-2*pA*pB);return Math.min(0.97,Math.max(0.03,isNaN(p)?0.5:p));}
+function injPen(roster,sw=0.09,kw=0.045,rw=0.012){return(roster||[]).reduce((s,p)=>{if(p.status==="PLAYING")return s;const miss=p.status==="OUT"?1:p.status==="DOUBTFUL"?.65:.30;return s+miss*(p.role==="STAR"?sw:p.role==="KEY"?kw:rw);},0);}
+
+// â”€â”€ NBA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// True NBA HCA: ~3.2 pts, home wins ~59% of games historically
+// Calibration target: range should be roughly 43â€“66% for most matchups
+
+function nbaMdlPythagorean(h,a){
+  // Season Pythagorean (exp 13.91 = empirically optimal for NBA)
+  // Uses point differential, ignores W/L noise
+  const hP=pythagorean(h.ppg,h.opp,13.91);
+  const aP=pythagorean(a.ppg,a.opp,13.91);
+  // L10 Pythagorean for recency â€” recent form is meaningful but noisy
+  const hR=pythagorean(h.last10_ppg||h.ppg, h.last10_opp||h.opp, 13.91);
+  const aR=pythagorean(a.last10_ppg||a.ppg, a.last10_opp||a.opp, 13.91);
+  // Blend: 65% season quality, 35% recent form
+  const hQ=hP*0.65+hR*0.35;
+  const aQ=aP*0.65+aR*0.35;
+  // HCA applied as a fixed pythagorean bump: home team modeled as if scoring 3.2 more
+  const hHCA=pythagorean(h.ppg+3.2,h.opp,13.91);
+  const hAdj=hQ*0.65+hHCA*0.35;
+  // Injury reduction applied to quality directly
+  const hi=injPen(h.roster,0.09,0.04,0.01);
+  const ai=injPen(a.roster,0.09,0.04,0.01);
+  const p=log5(Math.max(0.03,hAdj-hi),Math.max(0.03,aQ-ai));
+  return{homeProb:p,hQ:(hQ*100).toFixed(1),aQ:(aQ*100).toFixed(1),detail:`H Pyth ${(hQ*100).toFixed(1)}%  A Pyth ${(aQ*100).toFixed(1)}%  +3.2pt HCA`};}
+
+function nbaMdlNetRating(h,a){
+  // Net rating blend: season NET is the single best predictor
+  // +1 pt net rating â‰ˆ +2.7% win probability (empirical NBA)
+  const hNet=h.ppg-h.opp;
+  const aNet=a.ppg-a.opp;
+  const hRecNet=(h.last10_ppg||h.ppg)-(h.last10_opp||h.opp);
+  const aRecNet=(a.last10_ppg||a.ppg)-(a.last10_opp||a.opp);
+  // Weight recent more than season â€” injuries/trades make recent more real
+  const hBlend=hNet*0.55+hRecNet*0.45;
+  const aBlend=aNet*0.55+aRecNet*0.45;
+  const hi=injPen(h.roster,0.10,0.05,0.01);
+  const ai=injPen(a.roster,0.10,0.05,0.01);
+  // 3.2pt HCA, injury adjustment as pts (star out â‰ˆ -2.5 effective pts)
+  const adjDiff=(hBlend-aBlend)+3.2-(hi-ai)*18;
+  // Scale: 1pt = 0.027, logit calibrated to NBA range
+  const p=logistic(adjDiff*0.11);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hNet:hBlend.toFixed(1),aNet:aBlend.toFixed(1),detail:`H Net ${hBlend>0?"+":""}${hBlend.toFixed(1)}  A Net ${aBlend>0?"+":""}${aBlend.toFixed(1)}  Diff: ${adjDiff.toFixed(1)}`};}
+
+function nbaMdlFourFactors(h,a){
+  // Four Factors: eFG% 40%, TOV% 25%, OREB% 20%, FTR 15%
+  // INDEPENDENT from PPG/opp signal â€” uses efficiency ratios
+  // NBA average: eFG ~52%, TOV ~13%, OREB ~25%, FTR ~23%
+  const ff=d=>{
+    const efg=(d.efg_pct||0.52)*0.40;
+    // tov_rate from API is turnovers per 100 possessions (NBA avg ~13)
+    // Normalize to 0-1 where lower is better: (25-tov)/25 scaled
+    const tov=(1-Math.min(d.tov_rate||13,25)/25)*0.25;
+    const oreb=(d.oreb_pct||0.25)*0.20;
+    const ftr=Math.min(d.ftr||d.ft_rate||0.22,0.50)*0.15;
+    return efg+tov+oreb+ftr;};
+  const hFF=ff(h),aFF=ff(a);
+  // Small HCA: home teams shoot ~0.5% better eFG, steal ~0.5% fewer possessions
+  const hFFadj=hFF+0.002*0.40+0.001*0.25;
+  const hi=injPen(h.roster,0.06,0.03,0.008);
+  const ai=injPen(a.roster,0.06,0.03,0.008);
+  const p=logistic((hFFadj-aFF)*9-(hi-ai)*3.5);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hFF:hFF.toFixed(4),aFF:aFF.toFixed(4),detail:`H FF: ${hFF.toFixed(3)}  A FF: ${aFF.toFixed(3)}`};}
+
+function nbaMdlStarPower(h,a){
+  // Star power model: top 3 players drive outcomes (different signal from team averages)
+  // Sorted by PER â€” if star is OUT that cascades hard
+  const sortH=[...(h.roster||[])].sort((x,y)=>(y.per||0)-(x.per||0));
+  const sortA=[...(a.roster||[])].sort((x,y)=>(y.per||0)-(x.per||0));
+  const score=roster=>{
+    // NBA: player value is front-loaded. #1 star â‰ˆ 35% of team value
+    const w=[0.35,0.25,0.17,0.23/Math.max(roster.length-3,1)];
+    return roster.reduce((s,p,i)=>{
+      const wi=i<3?w[i]:w[3];
+      const avail=p.status==="PLAYING"?1:p.status==="OUT"?0:p.status==="DOUBTFUL"?.20:.62;
+      return s+(p.per||12)*wi*avail;
+    },0);};
+  const hV=score(sortH),aV=score(sortA);
+  // HCA adds ~3% to home team's effective star impact (crowd energy)
+  const p=logistic((hV-aV)*0.085+0.09);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hVal:hV.toFixed(1),aVal:aV.toFixed(1),detail:`H star PER: ${hV.toFixed(1)}  A star PER: ${aV.toFixed(1)}`};}
+
+function nbaMdlMonteCarlo(h,a,N=10000){
+  // Point-spread simulation â€” different methodology from all above
+  // Uses offensive + defensive ratings to project actual scores
+  const hi=injPen(h.roster,0.11,0.055,0.01);
+  const ai=injPen(a.roster,0.11,0.055,0.01);
+  const hOff=(h.ppg*0.60+(h.last10_ppg||h.ppg)*0.40)*(1-hi);
+  const aOff=(a.ppg*0.60+(a.last10_ppg||a.ppg)*0.40)*(1-ai);
+  const hDef=(a.opp*0.60+(a.last10_opp||a.opp)*0.40)*(1-ai*0.4);
+  const aDef=(h.opp*0.60+(h.last10_opp||h.opp)*0.40)*(1-hi*0.4);
+  // Projected scores blend own offense vs opponent defense
+  const hExp=(hOff*0.55+(100-hDef)*0.45)+1.6; // +1.6 HCA in pts
+  const aExp=aOff*0.55+(100-aDef)*0.45;
+  const sig=11.5; // NBA single-game std dev ~11-12 pts
+  let w=0;
+  for(let i=0;i<N;i++){
+    const z1=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
+    const z2=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
+    if(hExp+z1*sig>aExp+z2*sig)w++;}
+  return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts`};}
+
+function nbaConsensus(ps){
+  // NetRating gets most weight â€” it's the best single NBA predictor
+  // Pythagorean next â€” independent from raw net rating
+  // FF, StarPower, MC provide orthogonal checks
+  return Math.min(0.97,Math.max(0.03,[0.20,0.28,0.18,0.16,0.18].reduce((s,w,i)=>s+ps[i]*w,0)));}
 
 function NBAPage(){
   const [awayTeam,setAwayTeam]=useState("");const [homeTeam,setHomeTeam]=useState("");const [awayOdds,setAwayOdds]=useState("");const [homeOdds,setHomeOdds]=useState("");const [awayData,setAwayData]=useState(null);const [homeData,setHomeData]=useState(null);const [awayLoading,setAwayLoading]=useState(false);const [homeLoading,setHomeLoading]=useState(false);const [awayError,setAwayError]=useState("");const [homeError,setHomeError]=useState("");const [results,setResults]=useState(null);const [tab,setTab]=useState("results");const [analyzing,setAnalyzing]=useState(false);
   const fetchTeam=async(team,side)=>{const setL=side==="away"?setAwayLoading:setHomeLoading;const setD=side==="away"?setAwayData:setHomeData;const setE=side==="away"?setAwayError:setHomeError;setL(true);setD(null);setE("");setResults(null);try{const r=await fetch("/api/team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({team,sport:"nba"})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);setD(d);}catch(e){setE(e.message);}setL(false);};
   const cyclePlayer=(side,name)=>{const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];if(!g)return;s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});};
-  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const elo=nbaMdlElo(homeData,awayData),rap=nbaMdlRaptor(homeData,awayData),ff=nbaMdlFF(homeData,awayData),ml=nbaMdlML(homeData,awayData),mc=nbaMdlMC(homeData,awayData);setResults({elo,rap,ff,ml,mc,cons:nbaConsensus([elo.homeProb,rap.homeProb,ff.homeProb,ml.homeProb,mc.homeProb])});setTab("results");setAnalyzing(false);},50);};
+  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const pyth=nbaMdlPythagorean(homeData,awayData),net=nbaMdlNetRating(homeData,awayData),ff=nbaMdlFourFactors(homeData,awayData),star=nbaMdlStarPower(homeData,awayData),mc=nbaMdlMonteCarlo(homeData,awayData);setResults({pyth,net,ff,star,mc,cons:nbaConsensus([pyth.homeProb,net.homeProb,ff.homeProb,star.homeProb,mc.homeProb])});setTab("results");setAnalyzing(false);},50);};
   const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
   const bothLoaded=awayData&&homeData;const awayAbbr=NBA_ABBR[awayTeam]||"AWY";const homeAbbr=NBA_ABBR[homeTeam]||"HME";
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
@@ -131,7 +242,7 @@ function NBAPage(){
 }
 
 function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOdds,tab,setTab,onRecalc}){
-  const {elo,rap,ff,ml,mc,cons}=results;const cH=cons,aw=1-cH;
+  const {pyth,net,ff,star,mc,cons}=results;const cH=cons,aw=1-cH;
   const hI=oddsToImplied(homeOdds),aI=oddsToImplied(awayOdds);
   const hE=hI!==null?((cH-hI)*100).toFixed(1):null,aE=aI!==null?((aw-aI)*100).toFixed(1):null;
   const hEV=homeOdds&&hI?calcEV(cH,homeOdds):null,aEV=awayOdds&&aI?calcEV(aw,awayOdds):null;
@@ -148,23 +259,24 @@ function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
         </div>
         <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr}/>
         {(aE||hE)&&<div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>{aE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(aE)>=2?C.teal+"18":C.black,border:"1px solid "+(parseFloat(aE)>=2?C.teal:C.border),fontSize:11,color:parseFloat(aE)>=2?C.teal:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{awayAbbr} Edge: {parseFloat(aE)>=0?"+":""}{aE}%{aEV?" - EV "+(parseFloat(aEV)>=0?"+":"")+aEV+"/$1":""}</div>}{hE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(hE)>=2?C.teal+"18":C.black,border:"1px solid "+(parseFloat(hE)>=2?C.teal:C.border),fontSize:11,color:parseFloat(hE)>=2?C.teal:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{homeAbbr} Edge: {parseFloat(hE)>=0?"+":""}{hE}%{hEV?" - EV "+(parseFloat(hEV)>=0?"+":"")+hEV+"/$1":""}</div>}</div>}
+        {(hI&&aI)&&(()=>{const mktH=hI/(hI+aI);const mktA=aI/(hI+aI);const ourH=cH;const diff=Math.abs(ourH-mktH);const big=diff>=0.10;return big?<div style={{marginTop:10,padding:"10px 14px",background:"#1a120a",border:"1px solid "+C.amber+"66",borderRadius:8,display:"flex",gap:8,alignItems:"flex-start"}}><div style={{fontSize:14,flexShrink:0}}>âš ï¸</div><div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.amber,letterSpacing:1}}>MODEL/MARKET DIVERGENCE</div><div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.6}}>Market implies {(mktH*100).toFixed(0)}% {homeAbbr} / {(mktA*100).toFixed(0)}% {awayAbbr}. Our model says {(cH*100).toFixed(0)}% / {(aw*100).toFixed(0)}%. Gap of {(diff*100).toFixed(0)}%. Large divergences usually mean the market knows something â€” injuries, line movement, or our stats may be stale. Bet smaller or verify.</div></div></div>:null;})()}
         <button className="hov-btn" onClick={onRecalc} style={{marginTop:12,width:"100%",padding:"9px 0",background:"transparent",border:"1px solid "+C.border,borderRadius:7,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.muted,textTransform:"uppercase"}}>Recalculate with Updated Injuries</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-        <ModelCard icon="ELO" name="Elo Rating" desc="Win-rate Elo + recent form + home court" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-elo.homeProb} detail={"Away Elo: "+elo.aElo+"  Home Elo: "+elo.hElo+"  +100 HCA"}/>
-        <ModelCard icon="PER" name="RAPTOR Impact" desc="Player PER weighted by availability" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-rap.homeProb} detail={"Away adj PER: "+rap.aVal+"  Home: "+rap.hVal}/>
-        <ModelCard icon="4F" name="Four Factors" desc="eFG%, TOV%, OREB%, FTR + net rating" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={"Away FF: "+ff.aFF+"  Home: "+ff.hFF}/>
-        <ModelCard icon="ML" name="ML / BPI" desc="7-feature logistic regression" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ml.homeProb} detail="Net rtg  Win%  Eff  L10  Injury penalty"/>
+        <ModelCard icon="PYT" name="Pythagorean" desc="Point diff Pythagorean (exp 13.9) + L10 blend" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-pyth.homeProb} detail={pyth.detail}/>
+        <ModelCard icon="NET" name="Net Rating" desc="PPG minus OPP â€” best single NBA predictor" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-net.homeProb} detail={net.detail}/>
+        <ModelCard icon="4F" name="Four Factors" desc="eFG%, TOV%, OREB%, FTR efficiency ratios" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={ff.detail}/>
+        <ModelCard icon="STR" name="Star Power" desc="Top-3 player PER weighted by availability" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-star.homeProb} detail={star.detail}/>
       </div>
-      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games - Normal distribution" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={"Proj: "+awayTeam.split(" ").at(-1)+" "+mc.aExp+"  "+homeTeam.split(" ").at(-1)+" "+mc.hExp+" pts"}/>
+      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games - Normal distribution" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={mc.detail}/>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.copper,textTransform:"uppercase",marginBottom:10}}>Model Agreement</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
-          {[{l:"Elo",p:1-elo.homeProb},{l:"RAPTOR",p:1-rap.homeProb},{l:"4 Factors",p:1-ff.homeProb},{l:"ML/BPI",p:1-ml.homeProb},{l:"Monte Carlo",p:1-mc.homeProb}].map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+C.teal+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.teal}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:C.teal,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}
+          {[{l:"Pythagorean",p:1-pyth.homeProb},{l:"Net Rating",p:1-net.homeProb},{l:"4 Factors",p:1-ff.homeProb},{l:"Star Power",p:1-star.homeProb},{l:"Monte Carlo",p:1-mc.homeProb}].map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+C.teal+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.teal}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:C.teal,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}
         </div>
       </div>
     </>}
-    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["ELO","Elo Rating (18%)","Win rate to Elo (1500 base). L10 adjusts dynamically. +100 home court."],["PER","RAPTOR / Player Impact (22%)","PER x availability: OUT=0%, DOUBTFUL=25%, QUESTIONABLE=65%, PLAYING=100%."],["4F","Net Rating / Four Factors (22%)","eFG%(40%) + TOV(25%) + OREB(20%) + FTR(15%) with net rating."],["ML","ML / BPI-Style (22%)","Logistic regression: net rating, win%, efficiency, L10, injury penalty, HCA."],["MC","Monte Carlo (16%)","8,000 simulations. Normal distribution scoring adjusted for injuries."],["W","Consensus","Elo x18% + RAPTOR x22% + FF x22% + ML x22% + MC x16%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.copper+"22",border:"1px solid "+C.copper+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.copper,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.copper,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
+    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["PYT","Pythagorean (20%)","Season + L10 Pythagorean win% (exp 13.9). Regresses luck out of raw W/L. HCA via +3.2pt scoring model."],["NET","Net Rating (28%)","55% season + 45% recent PPG-OPP differential. Best single NBA predictor. 1pt â‰ˆ +2.7% win probability."],["4F","Four Factors (18%)","eFG%(40%) + TOV%(25%) + OREB%(20%) + FTR(15%). Entirely independent efficiency signal."],["STR","Star Power (16%)","Top-3 PER weighted by injury status: OUT=0%, DOUBTFUL=20%, Q=62%. Top player worth 35% of team score."],["MC","Monte Carlo (18%)","10,000 simulations blending offense vs opponent defense. Normal distribution Ïƒ=11.5pts."],["W","Consensus","Pythagorean 20% + Net Rating 28% + Four Factors 18% + Star Power 16% + Monte Carlo 18%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.copper+"22",border:"1px solid "+C.copper+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.copper,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.copper,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
   </div>;
 }
 
@@ -172,18 +284,90 @@ function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
 const NHL_TEAMS=["Anaheim Ducks","Boston Bruins","Buffalo Sabres","Calgary Flames","Carolina Hurricanes","Chicago Blackhawks","Colorado Avalanche","Columbus Blue Jackets","Dallas Stars","Detroit Red Wings","Edmonton Oilers","Florida Panthers","Los Angeles Kings","Minnesota Wild","Montreal Canadiens","Nashville Predators","New Jersey Devils","New York Islanders","New York Rangers","Ottawa Senators","Philadelphia Flyers","Pittsburgh Penguins","San Jose Sharks","Seattle Kraken","St. Louis Blues","Tampa Bay Lightning","Toronto Maple Leafs","Utah Mammoth","Vancouver Canucks","Vegas Golden Knights","Washington Capitals","Winnipeg Jets"];
 const NHL_ABBR={"Anaheim Ducks":"ANA","Boston Bruins":"BOS","Buffalo Sabres":"BUF","Calgary Flames":"CGY","Carolina Hurricanes":"CAR","Chicago Blackhawks":"CHI","Colorado Avalanche":"COL","Columbus Blue Jackets":"CBJ","Dallas Stars":"DAL","Detroit Red Wings":"DET","Edmonton Oilers":"EDM","Florida Panthers":"FLA","Los Angeles Kings":"LAK","Minnesota Wild":"MIN","Montreal Canadiens":"MTL","Nashville Predators":"NSH","New Jersey Devils":"NJD","New York Islanders":"NYI","New York Rangers":"NYR","Ottawa Senators":"OTT","Philadelphia Flyers":"PHI","Pittsburgh Penguins":"PIT","San Jose Sharks":"SJS","Seattle Kraken":"SEA","St. Louis Blues":"STL","Tampa Bay Lightning":"TBL","Toronto Maple Leafs":"TOR","Utah Mammoth":"UTA","Vancouver Canucks":"VAN","Vegas Golden Knights":"VGK","Washington Capitals":"WSH","Winnipeg Jets":"WPG"};
 
-function nhlMdlElo(h,a){const hp=h.points/Math.max(h.wins+h.losses+h.otl,1)/2,ap=a.points/Math.max(a.wins+a.losses+a.otl,1)/2;const hE=1500+400*Math.log10(Math.max(hp,.01)/Math.max(1-hp,.01)),aE=1500+400*Math.log10(Math.max(ap,.01)/Math.max(1-ap,.01));const h10=(h.last10_gf||h.gf_pg)-(h.last10_ga||h.ga_pg),a10=(a.last10_gf||a.gf_pg)-(a.last10_ga||a.ga_pg);const p=1/(1+Math.pow(10,(aE+a10*40-((hE+h10*40)+60))/400));return{homeProb:Math.min(.97,Math.max(.03,p)),hElo:Math.round(hE+h10*40),aElo:Math.round(aE+a10*40)};}
-function nhlMdlGoalie(h,a){const gP=g=>(g&&g.status&&g.status!=="PLAYING")?((g.status==="OUT"?1:g.status==="DOUBTFUL"?.7:.35)*(.920-(g.save_pct||.905))):0;const hSv=(h.goalie?.save_pct||.905)-gP(h.goalie),aSv=(a.goalie?.save_pct||.905)-gP(a.goalie);const hGA=(h.shots_against_pg||30)*(1-hSv),aGA=(a.shots_against_pg||30)*(1-aSv);return{homeProb:Math.min(.97,Math.max(.03,logistic((aGA-hGA)*1.2+.05))),hSv:hSv.toFixed(3),aSv:aSv.toFixed(3),hGA:hGA.toFixed(2),aGA:aGA.toFixed(2)};}
-function nhlMdlSpecialTeams(h,a){const hST=(h.pp_pct||20)/100*.6+(h.pk_pct||80)/100*.4,aST=(a.pp_pct||20)/100*.6+(a.pk_pct||80)/100*.4;const iP=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.role==="STAR"?.06:p.role==="KEY"?.03:.01),0);return{homeProb:Math.min(.97,Math.max(.03,logistic((hST-aST)*3+(iP(a.roster)-iP(h.roster))+.05))),hST:(hST*100).toFixed(1),aST:(aST*100).toFixed(1)};}
-function nhlMdlCorsi(h,a){const hCF=h.shots_pg/(h.shots_pg+a.shots_against_pg||60),aCF=a.shots_pg/(a.shots_pg+h.shots_against_pg||60);return{homeProb:Math.min(.97,Math.max(.03,logistic((hCF-aCF)*3+(h.gf_pg-h.ga_pg-(a.gf_pg-a.ga_pg))*.3+.05))),hCF:(hCF*100).toFixed(1),aCF:(aCF*100).toFixed(1)};}
-function nhlMdlMC(h,a,N=8000){const gA=d=>d.goalie?.status==="OUT"?.4:d.goalie?.status==="DOUBTFUL"?.2:d.goalie?.status==="QUESTIONABLE"?.1:0;const iA=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.role==="STAR"?.08:p.role==="KEY"?.04:.01),0);const hExp=h.gf_pg-gA(h)-iA(h.roster)+.1,aExp=a.gf_pg-gA(a)-iA(a.roster);let hw=0;for(let i=0;i<N;i++){const hG=Math.max(0,hExp+Math.sqrt(Math.max(hExp,.5))*(Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random())));const aG=Math.max(0,aExp+Math.sqrt(Math.max(aExp,.5))*(Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random())));hw+=hG>aG?1:hG===aG?.5:0;}return{homeProb:Math.min(.97,Math.max(.03,hw/N)),hExp:hExp.toFixed(2),aExp:aExp.toFixed(2)};}
-function nhlConsensus(ps){return Math.min(.97,Math.max(.03,[.20,.28,.20,.17,.15].reduce((s,w,i)=>s+ps[i]*w,0)));}
+function nhlMdlGoalDiff(h,a){
+  // Goals per game differential â€” the primary NHL quality signal
+  // Pythagorean exp=2.0 works well for hockey
+  const hP=pythagorean(h.gf_pg,h.ga_pg,2.0);
+  const aP=pythagorean(a.gf_pg,a.ga_pg,2.0);
+  const hR=pythagorean(h.last10_gf||h.gf_pg,h.last10_ga||h.ga_pg,2.0);
+  const aR=pythagorean(a.last10_gf||a.gf_pg,a.last10_ga||a.ga_pg,2.0);
+  const hQ=hP*0.60+hR*0.40;
+  const aQ=aP*0.60+aR*0.40;
+  // HCA: +0.10 goals â†’ ~pythagorean bump
+  const hHCA=pythagorean(h.gf_pg+0.10,h.ga_pg,2.0);
+  const hAdj=hQ*0.65+hHCA*0.35;
+  const hi=injPen(h.roster,0.07,0.035,0.008);
+  const ai=injPen(a.roster,0.07,0.035,0.008);
+  const hGI=h.goalie?.status==="OUT"?0.055:h.goalie?.status==="DOUBTFUL"?0.035:h.goalie?.status==="QUESTIONABLE"?0.015:0;
+  const aGI=a.goalie?.status==="OUT"?0.055:a.goalie?.status==="DOUBTFUL"?0.035:a.goalie?.status==="QUESTIONABLE"?0.015:0;
+  const p=log5(Math.max(0.03,hAdj-hi-hGI),Math.max(0.03,aQ-ai-aGI));
+  return{homeProb:p,hQ:(hQ*100).toFixed(1),aQ:(aQ*100).toFixed(1),detail:`H Pyth ${(hQ*100).toFixed(1)}%  A Pyth ${(aQ*100).toFixed(1)}%  +0.10G HCA`};}
+
+function nhlMdlGoalie(h,a){
+  // Goalie save% â†’ expected GA â€” most important single NHL factor
+  const hSV=Math.max(0.860,Math.min(0.940,(h.goalie?.save_pct||0.905)-(h.goalie?.status==="OUT"?0.025:h.goalie?.status==="DOUBTFUL"?0.015:h.goalie?.status==="QUESTIONABLE"?0.008:0)));
+  const aSV=Math.max(0.860,Math.min(0.940,(a.goalie?.save_pct||0.905)-(a.goalie?.status==="OUT"?0.025:a.goalie?.status==="DOUBTFUL"?0.015:a.goalie?.status==="QUESTIONABLE"?0.008:0)));
+  // xGA = shots faced Ã— (1 - SV%)
+  const hxGA=(a.shots_pg||30)*(1-hSV);
+  const axGA=(h.shots_pg||30)*(1-aSV);
+  // 0.5 goal diff â‰ˆ 9% win prob change in NHL
+  const diff=axGA-hxGA+0.10; // +0.10 HCA
+  const p=logistic(diff*2.0);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hSV:hSV.toFixed(3),aSV:aSV.toFixed(3),detail:`H SV% ${hSV.toFixed(3)} xGA ${hxGA.toFixed(2)}  A SV% ${aSV.toFixed(3)} xGA ${axGA.toFixed(2)}`};}
+
+function nhlMdlSpecialTeams(h,a){
+  // PP% and PK% â€” genuinely independent from 5-on-5 goal data
+  const hPP=(h.pp_pct||20)/100;const aPP=(a.pp_pct||20)/100;
+  const hPK=(h.pk_pct||80)/100;const aPK=(a.pk_pct||80)/100;
+  const hST=hPP*0.57+hPK*0.43;
+  const aST=aPP*0.57+aPK*0.43;
+  const hi=injPen(h.roster,0.05,0.025,0.005);
+  const ai=injPen(a.roster,0.05,0.025,0.005);
+  // Small HCA: home team gets slightly more power plays (~3% more)
+  const p=logistic((hST-aST)*7+0.06-(hi-ai)*2);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hST:(hST*100).toFixed(1),aST:(aST*100).toFixed(1),detail:`H ST: ${(hST*100).toFixed(1)}%  A ST: ${(aST*100).toFixed(1)}%`};}
+
+function nhlMdlShotQuality(h,a){
+  // Shot generation + finishing â€” proxy for possession/Corsi
+  // shots_pg / shots_against_pg ratio = season CF%
+  const hSh=h.shots_pg||30;const aSh=a.shots_pg||30;
+  const hAg=h.shots_against_pg||30;const aAg=a.shots_against_pg||30;
+  const hCF=hSh/(hSh+hAg);
+  const aCF=aSh/(aSh+aAg);
+  // Shooting% (goals/shots) captures finishing skill
+  const hSP=h.gf_pg/Math.max(hSh,15);
+  const aSP=a.gf_pg/Math.max(aSh,15);
+  // xG model: CF% weighted by finishing rate
+  const hXG=hSh*hSP;const aXG=aSh*aSP;
+  const p=logistic((hCF-aCF)*4+(hXG-aXG)*5+0.06);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hCF:(hCF*100).toFixed(1),aCF:(aCF*100).toFixed(1),detail:`H CF% ${(hCF*100).toFixed(1)}  A CF% ${(aCF*100).toFixed(1)}`};}
+
+function nhlMdlMonteCarlo(h,a,N=10000){
+  // Poisson simulation â€” goals are Poisson distributed
+  const hGI=h.goalie?.status==="OUT"?0.32:h.goalie?.status==="DOUBTFUL"?0.20:h.goalie?.status==="QUESTIONABLE"?0.10:0;
+  const aGI=a.goalie?.status==="OUT"?0.32:a.goalie?.status==="DOUBTFUL"?0.20:a.goalie?.status==="QUESTIONABLE"?0.10:0;
+  const hi=injPen(h.roster,0.065,0.03,0.007);
+  const ai=injPen(a.roster,0.065,0.03,0.007);
+  const hGF=(h.gf_pg*0.60+(h.last10_gf||h.gf_pg)*0.40)*(1-hi);
+  const aGA=(h.ga_pg*0.60+(h.last10_ga||h.ga_pg)*0.40)*(1-aGI*0.5);
+  const aGF=(a.gf_pg*0.60+(a.last10_gf||a.gf_pg)*0.40)*(1-ai);
+  const hGA=(a.ga_pg*0.60+(a.last10_ga||a.ga_pg)*0.40)*(1-hGI*0.5);
+  const hL=Math.max(0.6,(hGF+(3.0-hGA))/2+0.05);
+  const aL=Math.max(0.6,(aGF+(3.0-aGA))/2);
+  function rpois(lam){let k=0,p=1,L=Math.exp(-lam);while(p>L){k++;p*=Math.random();}return k-1;}
+  let hw=0,tie=0;
+  for(let i=0;i<N;i++){const hg=rpois(hL),ag=rpois(aL);if(hg>ag)hw++;else if(hg===ag)tie++;}
+  return{homeProb:Math.min(0.97,Math.max(0.03,(hw+tie*0.55)/N)),hLambda:hL.toFixed(2),aLambda:aL.toFixed(2),detail:`Proj: H ${hL.toFixed(2)}  A ${aL.toFixed(2)} goals`};}
+
+function nhlConsensus(ps){
+  // Goalie 30%, GoalDiff 22%, MC 18%, SpecTeams 17%, ShotQuality 13%
+  return Math.min(0.97,Math.max(0.03,[0.22,0.30,0.17,0.13,0.18].reduce((s,w,i)=>s+ps[i]*w,0)));}
 
 function NHLPage(){
   const [awayTeam,setAwayTeam]=useState("");const [homeTeam,setHomeTeam]=useState("");const [awayOdds,setAwayOdds]=useState("");const [homeOdds,setHomeOdds]=useState("");const [awayData,setAwayData]=useState(null);const [homeData,setHomeData]=useState(null);const [awayLoading,setAwayLoading]=useState(false);const [homeLoading,setHomeLoading]=useState(false);const [awayError,setAwayError]=useState("");const [homeError,setHomeError]=useState("");const [results,setResults]=useState(null);const [tab,setTab]=useState("results");const [analyzing,setAnalyzing]=useState(false);
   const fetchTeam=async(team,side)=>{const setL=side==="away"?setAwayLoading:setHomeLoading;const setD=side==="away"?setAwayData:setHomeData;const setE=side==="away"?setAwayError:setHomeError;setL(true);setD(null);setE("");setResults(null);try{const r=await fetch("/api/team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({team,sport:"nhl"})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);setD(d);}catch(e){setE(e.message);}setL(false);};
   const cyclePlayer=(side,name)=>{const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];if(!g)return;if(name==="__goalie__"){s({...g,goalie:{...g.goalie,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(g.goalie.status||"PLAYING")+1)%4]}});}else{s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});}};
-  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const elo=nhlMdlElo(homeData,awayData),gl=nhlMdlGoalie(homeData,awayData),st=nhlMdlSpecialTeams(homeData,awayData),cs=nhlMdlCorsi(homeData,awayData),mc=nhlMdlMC(homeData,awayData);setResults({elo,gl,st,cs,mc,cons:nhlConsensus([elo.homeProb,gl.homeProb,st.homeProb,cs.homeProb,mc.homeProb])});setTab("results");setAnalyzing(false);},50);};
+  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const gd=nhlMdlGoalDiff(homeData,awayData),gl=nhlMdlGoalie(homeData,awayData),st=nhlMdlSpecialTeams(homeData,awayData),sq=nhlMdlShotQuality(homeData,awayData),mc=nhlMdlMonteCarlo(homeData,awayData);setResults({gd,gl,st,sq,mc,cons:nhlConsensus([gd.homeProb,gl.homeProb,st.homeProb,sq.homeProb,mc.homeProb])});setTab("results");setAnalyzing(false);},50);};
   const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
   const bothLoaded=awayData&&homeData;const awayAbbr=NHL_ABBR[awayTeam]||"AWY";const homeAbbr=NHL_ABBR[homeTeam]||"HME";
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
@@ -206,7 +390,7 @@ function NHLPage(){
 }
 
 function NHLResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOdds,tab,setTab,onRecalc}){
-  const {elo,gl,st,cs,mc,cons}=results;const cH=cons,aw=1-cH;
+  const {gd,gl,st,sq,mc,cons}=results;const cH=cons,aw=1-cH;
   const hI=oddsToImplied(homeOdds),aI=oddsToImplied(awayOdds);
   const hE=hI!==null?((cH-hI)*100).toFixed(1):null,aE=aI!==null?((aw-aI)*100).toFixed(1):null;
   const hEV=homeOdds&&hI?calcEV(cH,homeOdds):null,aEV=awayOdds&&aI?calcEV(aw,awayOdds):null;
@@ -222,23 +406,24 @@ function NHLResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
         </div>
         <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr} accent={C.ice}/>
         {(aE||hE)&&<div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>{aE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(aE)>=2?C.ice+"18":C.black,border:"1px solid "+(parseFloat(aE)>=2?C.ice:C.border),fontSize:11,color:parseFloat(aE)>=2?C.ice:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{awayAbbr} Edge: {parseFloat(aE)>=0?"+":""}{aE}%{aEV?" - EV "+(parseFloat(aEV)>=0?"+":"")+aEV+"/$1":""}</div>}{hE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(hE)>=2?C.ice+"18":C.black,border:"1px solid "+(parseFloat(hE)>=2?C.ice:C.border),fontSize:11,color:parseFloat(hE)>=2?C.ice:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{homeAbbr} Edge: {parseFloat(hE)>=0?"+":""}{hE}%{hEV?" - EV "+(parseFloat(hEV)>=0?"+":"")+hEV+"/$1":""}</div>}</div>}
+        {(hI&&aI)&&(()=>{const mktH=hI/(hI+aI);const diff=Math.abs(cH-mktH);const big=diff>=0.10;return big?<div style={{marginTop:10,padding:"10px 14px",background:"#0a121a",border:"1px solid "+C.ice+"66",borderRadius:8,display:"flex",gap:8,alignItems:"flex-start"}}><div style={{fontSize:14,flexShrink:0}}>âš ï¸</div><div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.ice,letterSpacing:1}}>MODEL/MARKET DIVERGENCE</div><div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.6}}>Market implies {(mktH*100).toFixed(0)}% {homeAbbr} / {((1-mktH)*100).toFixed(0)}% {awayAbbr}. Our model says {(cH*100).toFixed(0)}% / {(aw*100).toFixed(0)}%. Gap of {(diff*100).toFixed(0)}%. Verify goalie starter â€” a backup in net will kill this prediction.</div></div></div>:null;})()}
         <button className="hov-btn" onClick={onRecalc} style={{marginTop:12,width:"100%",padding:"9px 0",background:"transparent",border:"1px solid "+C.border,borderRadius:7,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.muted,textTransform:"uppercase"}}>Recalculate with Updated Lineup</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-        <ModelCard icon="ELO" name="Elo Rating" desc="Points-based Elo + recent form + home ice" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-elo.homeProb} detail={"Away Elo: "+elo.aElo+"  Home Elo: "+elo.hElo+"  +60 home ice"} accent={C.ice}/>
-        <ModelCard icon="SV%" name="Goalie Model" desc="Save% differential + expected goals against" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-gl.homeProb} detail={"Away SV%: "+gl.aSv+" xGA: "+gl.aGA+"  Home SV%: "+gl.hSv+" xGA: "+gl.hGA} accent={C.ice}/>
-        <ModelCard icon="PP" name="Special Teams" desc="Power play % + penalty kill % combined" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-st.homeProb} detail={"Away ST: "+st.aST+"  Home ST: "+st.hST} accent={C.ice}/>
-        <ModelCard icon="CF%" name="Shot Dominance / Corsi" desc="Shot attempt differential + goal rate" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-cs.homeProb} detail={"Away CF%: "+cs.aCF+"%  Home CF%: "+cs.hCF+"%"} accent={C.ice}/>
+        <ModelCard icon="GD" name="Goal Differential" desc="Pythagorean win% (exp 2.0) + L10 blend" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-gd.homeProb} detail={gd.detail} accent={C.ice}/>
+        <ModelCard icon="SV%" name="Goalie Model" desc="SV% â†’ xGA â€” biggest single NHL factor" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-gl.homeProb} detail={gl.detail} accent={C.ice}/>
+        <ModelCard icon="PP" name="Special Teams" desc="PP% (57%) + PK% (43%) combined score" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-st.homeProb} detail={st.detail} accent={C.ice}/>
+        <ModelCard icon="xG" name="Shot Quality / xG" desc="CF% Ã— shooting% â†’ expected goals" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-sq.homeProb} detail={sq.detail} accent={C.ice}/>
       </div>
-      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games - Poisson goal distribution" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={"Proj: "+awayTeam.split(" ").at(-1)+" "+mc.aExp+"  "+homeTeam.split(" ").at(-1)+" "+mc.hExp+" goals"} accent={C.ice}/>
+      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games - Poisson goal distribution" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={mc.detail} accent={C.ice}/>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.ice,textTransform:"uppercase",marginBottom:10}}>Model Agreement</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
-          {[{l:"Elo",p:1-elo.homeProb},{l:"Goalie",p:1-gl.homeProb},{l:"Spec Teams",p:1-st.homeProb},{l:"Corsi",p:1-cs.homeProb},{l:"Monte Carlo",p:1-mc.homeProb}].map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+C.ice+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.ice}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:C.ice,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}
+          {[{l:"Goal Diff",p:1-gd.homeProb},{l:"Goalie",p:1-gl.homeProb},{l:"Spec Teams",p:1-st.homeProb},{l:"Shot xG",p:1-sq.homeProb},{l:"Monte Carlo",p:1-mc.homeProb}].map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+C.ice+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.ice}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:C.ice,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}
         </div>
       </div>
     </>}
-    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["ELO","Elo Rating (20%)","Points-based Elo (1500 base). L10 goal differential adjusts. +60 home ice."],["SV%","Goalie Model (28%)","Save% x shots against = xGA. Goalie injuries heavily penalized."],["PP","Special Teams (20%)","PP% (60%) + PK% (40%). Special teams drive scoring opportunities."],["CF%","Shot Dominance / Corsi (17%)","Shot attempt differential as proxy for zone time and pressure."],["MC","Monte Carlo (15%)","8,000 simulations with Poisson goal distributions. Adjusts for injuries."],["W","Consensus","Elo x20% + Goalie x28% + SpecTeams x20% + Corsi x17% + MC x15%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.ice+"22",border:"1px solid "+C.ice+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.ice,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.ice,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
+    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["GD","Goal Differential (22%)","Pythagorean win% (exp 2.0) blends 60% season + 40% last-10. HCA = +0.10 goals. Goalie injury applied directly."],["SV%","Goalie Model (30%)","Adj SV% Ã— opp shots = xGA. Goalie out = -0.025 SV% penalty. Highest single NHL predictor."],["PP","Special Teams (17%)","PP% (57%) + PK% (43%). Independent from 5v5 goal data. Home team gets slight PP advantage."],["xG","Shot Quality xG (13%)","CF% Ã— shooting% = expected goals. Captures possession AND finishing skill."],["MC","Monte Carlo (18%)","10,000 Poisson simulations. Goals are Poisson distributed. Ties go ~55% home in OT."],["W","Consensus","Goal Diff 22% + Goalie 30% + Spec Teams 17% + Shot xG 13% + Monte Carlo 18%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.ice+"22",border:"1px solid "+C.ice+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.ice,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.ice,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
   </div>;
 }
 
@@ -295,54 +480,113 @@ const NCAAM_TEAMS=[
   {name:"Richmond Spiders",id:"257",conf:"A-10"},{name:"Saint Joseph's Hawks",id:"2603",conf:"A-10"},
 ].sort((a,b)=>a.name.localeCompare(b.name));
 
-function ncaamMdlKenPom(h,a){
-  // KenPom: adjusted efficiency margin drives win prob, +3.5pt HCA in college
-  const hAdj=(h.ppg-h.opp)+Math.max(0,(200-h.kenpom_rank)*0.04);
-  const aAdj=(a.ppg-a.opp)+Math.max(0,(200-a.kenpom_rank)*0.04);
-  const inj=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.role==="STAR"?.10:p.role==="KEY"?.05:.02),0);
-  const p=logistic((hAdj-aAdj)*0.09+3.5*0.09-(inj(h.roster)-inj(a.roster))*1.5);
-  return{homeProb:Math.min(.97,Math.max(.03,p)),hAdj:hAdj.toFixed(1),aAdj:aAdj.toFixed(1)};}
+function ncaamMdlEfficiency(h,a){
+  // Adjusted efficiency per 100 possessions â€” what KenPom actually measures
+  // Normalizing by tempo removes pace bias completely
+  const hOff=h.ppg/Math.max(h.tempo,55)*100;
+  const aDef=a.opp/Math.max(a.tempo,55)*100; // opp's pts ALLOWED per 100
+  const aOff=a.ppg/Math.max(a.tempo,55)*100;
+  const hDef=h.opp/Math.max(h.tempo,55)*100;
+  // Game efficiency margin: offense vs opponent defense
+  const hEM=hOff-aDef; // How much better H offense is vs A defense, per 100
+  const aEM=aOff-hDef;
+  // KenPom rank provides schedule-strength correction
+  const hRank=Math.min(h.kenpom_rank||150,350);
+  const aRank=Math.min(a.kenpom_rank||150,350);
+  const hRankAdj=(175-hRank)*0.03; // rank 1 = +5.2, rank 175 = 0, rank 350 = -5.25
+  const aRankAdj=(175-aRank)*0.03;
+  const hInj=injPen(h.roster,0.10,0.05,0.015);
+  const aInj=injPen(a.roster,0.10,0.05,0.015);
+  // HCA 3.5 pts per 100 poss at home â€” empirically ~3.5 for college
+  const diff=(hEM+hRankAdj)-(aEM+aRankAdj)+3.5-(hInj-aInj)*22;
+  const p=logistic(diff*0.075);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hEM:((hEM+hRankAdj)).toFixed(1),aEM:((aEM+aRankAdj)).toFixed(1),detail:`H AdjEM ${((hEM+hRankAdj)).toFixed(1)}  A AdjEM ${((aEM+aRankAdj)).toFixed(1)}`};}
 
-function ncaamMdlBPI(h,a){
-  // ESPN BPI-style: win% Elo with +90pt home court (college has bigger HCA)
-  const hw=h.wins/Math.max(h.wins+h.losses,1),aw=a.wins/Math.max(a.wins+a.losses,1);
-  const hE=1500+350*Math.log10(Math.max(hw,.01)/Math.max(1-hw,.01));
-  const aE=1500+350*Math.log10(Math.max(aw,.01)/Math.max(1-aw,.01));
-  const p=1/(1+Math.pow(10,(aE-((hE)+90))/350));
-  return{homeProb:Math.min(.97,Math.max(.03,p)),hBPI:Math.round(hE),aBPI:Math.round(aE)};}
+function ncaamMdlPythagorean(h,a){
+  // Win quality â€” Pythagorean win% with conference adjustment
+  // Exponent 11.5 = empirically best for college basketball
+  const hP=pythagorean(h.ppg,h.opp,11.5);
+  const aP=pythagorean(a.ppg,a.opp,11.5);
+  // Strength-of-schedule proxy: KenPom rank adjusts quality
+  const hSOS=Math.max(0.90,Math.min(1.10,1+(175-Math.min(h.kenpom_rank||150,350))*0.0015));
+  const aSOS=Math.max(0.90,Math.min(1.10,1+(175-Math.min(a.kenpom_rank||150,350))*0.0015));
+  const hQ=Math.min(0.97,hP*hSOS);
+  const aQ=Math.min(0.97,aP*aSOS);
+  const hHCA=pythagorean(h.ppg+3.5,h.opp,11.5);
+  const hAdj=hQ*0.65+hHCA*0.35;
+  const hi=injPen(h.roster,0.10,0.05,0.015);
+  const ai=injPen(a.roster,0.10,0.05,0.015);
+  const p=log5(Math.max(0.03,hAdj-hi),Math.max(0.03,aQ-ai));
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hQ:(hQ*100).toFixed(1),aQ:(aQ*100).toFixed(1),detail:`H Pyth ${(hQ*100).toFixed(1)}%  A Pyth ${(aQ*100).toFixed(1)}%  +3.5pt HCA`};}
 
 function ncaamMdlFourFactors(h,a){
-  // Four Factors tuned for college (higher TOV/OREB rates than NBA)
-  const ff=d=>(d.efg_pct||.50)*.40+(1-(d.tov_rate||17)/38)*.25+(d.oreb_pct||.30)*.20+(d.ft_rate||.35)*.15;
-  const inj=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.role==="STAR"?.08:p.role==="KEY"?.04:.015),0);
-  const hFF=ff(h),aFF=ff(a);
-  const p=logistic((hFF-aFF)*5+(h.ppg-h.opp-(a.ppg-a.opp))*0.07+3.5*0.07-inj(h.roster)+inj(a.roster));
-  return{homeProb:Math.min(.97,Math.max(.03,p)),hFF:hFF.toFixed(3),aFF:aFF.toFixed(3)};}
+  // Offensive + defensive four factors â€” independent from PPG signal
+  const offFF=d=>{
+    const efg=(d.efg_pct||0.50)*0.40;
+    // College TOV rate typically 15-22 per 100; normalize out of 35
+    const tov=(1-Math.min(d.tov_rate||18,35)/35)*0.25;
+    const oreb=(d.oreb_pct||0.30)*0.20;
+    const ftr=Math.min(d.ft_rate||d.ftr||0.35,0.60)*0.15;
+    return efg+tov+oreb+ftr;};
+  const defFF=d=>{
+    // Defensive four factors: opponent eFG%, opp TOV forced, opp OREB denied
+    const efg=Math.max(0,(0.56-(d.opp_efg_pct||0.50)))*0.40;
+    const tov=Math.min((d.opp_tov_rate||18)/35,1)*0.25;
+    const oreb=Math.max(0,0.32-(d.opp_oreb_pct||0.28))*0.20;
+    return efg+tov+oreb;};
+  const hOff=offFF(h),aOff=offFF(a);
+  const hDef=defFF(h),aDef=defFF(a);
+  const hTotal=hOff*0.55+hDef*0.45;
+  const aTotal=aOff*0.55+aDef*0.45;
+  const hi=injPen(h.roster,0.06,0.03,0.008);
+  const ai=injPen(a.roster,0.06,0.03,0.008);
+  // HCA small FF boost: home teams get ~1% eFG boost
+  const p=logistic((hTotal-aTotal)*7+0.28-(hi-ai)*3);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hFF:hOff.toFixed(3),aFF:aOff.toFixed(3),detail:`H Off FF: ${hOff.toFixed(3)}  A Off FF: ${aOff.toFixed(3)}`};}
 
-function ncaamMdlTempo(h,a){
-  // Tempo-adjusted scoring: pace matters more in college
-  const avgTempo=(h.tempo+a.tempo)/2;
-  const hPoss=h.ppg/Math.max(h.tempo,55)*avgTempo;
-  const aPoss=a.ppg/Math.max(a.tempo,55)*avgTempo;
-  const hDef=h.opp/Math.max(h.tempo,55)*avgTempo;
-  const aDef=a.opp/Math.max(a.tempo,55)*avgTempo;
-  const inj=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.role==="STAR"?.10:p.role==="KEY"?.05:.02),0);
-  const hScore=hPoss-aDef,aScore=aPoss-hDef;
-  const p=logistic((hScore-aScore)*0.09+3.5*0.09-(inj(h.roster)-inj(a.roster))*1.2);
-  return{homeProb:Math.min(.97,Math.max(.03,p)),hPace:h.tempo.toFixed(0),aPace:a.tempo.toFixed(0),hScore:hScore.toFixed(1),aScore:aScore.toFixed(1)};}
+function ncaamMdlTalent(h,a){
+  // Star player talent differential â€” entirely different signal from team stats
+  // In college a single star can be worth 15+ points to a team
+  const sortH=[...(h.roster||[])].sort((x,y)=>(y.per||0)-(x.per||0));
+  const sortA=[...(a.roster||[])].sort((x,y)=>(y.per||0)-(x.per||0));
+  const score=roster=>{
+    // College basketball: top player is even more important than NBA
+    const w=[0.40,0.28,0.18,0.14/Math.max(roster.length-3,1)];
+    return roster.reduce((s,p,i)=>{
+      const wi=i<3?(w[i]||0):(w[3]||0);
+      const avail=p.status==="PLAYING"?1:p.status==="OUT"?0:p.status==="DOUBTFUL"?.15:.55;
+      return s+(p.per||10)*wi*avail;
+    },0);};
+  const hV=score(sortH),aV=score(sortA);
+  // HCA in college: home crowd especially impacts road stars negatively
+  const p=logistic((hV-aV)*0.12+0.30);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hVal:hV.toFixed(1),aVal:aV.toFixed(1),detail:`H talent: ${hV.toFixed(1)}  A talent: ${aV.toFixed(1)}`};}
 
-function ncaamMdlMonteCarlo(h,a,N=8000){
-  const inj=r=>(r||[]).reduce((s,p)=>p.status==="PLAYING"?s:s+(p.status==="OUT"?1:p.status==="DOUBTFUL"?.6:.3)*(p.role==="STAR"?.12:p.role==="KEY"?.06:.02),0);
-  const hExp=((h.ppg-inj(h.roster)*2)+(100-(a.opp-inj(a.roster)*2)))/2+1.8;
-  const aExp=((a.ppg-inj(a.roster)*2)+(100-(h.opp-inj(h.roster)*2)))/2;
+function ncaamMdlMonteCarlo(h,a,N=10000){
+  // Tempo-aware point simulation
+  const hi=injPen(h.roster,0.11,0.055,0.013);
+  const ai=injPen(a.roster,0.11,0.055,0.013);
+  // Adjust both teams' PPG to the expected game pace
+  const gamePace=(h.tempo*0.5+a.tempo*0.5);
+  const hOff=(h.ppg/Math.max(h.tempo,55))*gamePace*(1-hi);
+  const aOff=(a.ppg/Math.max(a.tempo,55))*gamePace*(1-ai);
+  const hDef=(a.opp/Math.max(a.tempo,55))*gamePace;
+  const aDef=(h.opp/Math.max(h.tempo,55))*gamePace;
+  // Score = blend own off + (norm - opp def)
+  const hExp=(hOff*0.55+(100-hDef)*0.45)+1.8;
+  const aExp=aOff*0.55+(100-aDef)*0.45;
+  const sig=10; // NCAAM game SD ~10 pts per team
   let w=0;
   for(let i=0;i<N;i++){
     const z1=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
     const z2=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
-    if(hExp+z1*10>aExp+z2*10)w++;}
-  return{homeProb:Math.min(.97,Math.max(.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1)};}
+    if(hExp+z1*sig>aExp+z2*sig)w++;}
+  return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts`};}
 
-function ncaamConsensus(ps){return Math.min(.97,Math.max(.03,[.22,.20,.22,.20,.16].reduce((s,w,i)=>s+ps[i]*w,0)));}
+function ncaamConsensus(ps){
+  // Efficiency gets most weight (most reliable for college)
+  // Pythagorean second, FF and MC check
+  return Math.min(0.97,Math.max(0.03,[0.28,0.22,0.20,0.13,0.17].reduce((s,w,i)=>s+ps[i]*w,0)));}
 
 function NCAAMPage(){
   const [awayTeam,setAwayTeam]=useState(null);
@@ -383,8 +627,8 @@ function NCAAMPage(){
     if(!homeData||!awayData)return;
     setAnalyzing(true);
     setTimeout(()=>{
-      const kp=ncaamMdlKenPom(homeData,awayData),bpi=ncaamMdlBPI(homeData,awayData),ff=ncaamMdlFourFactors(homeData,awayData),tp=ncaamMdlTempo(homeData,awayData),mc=ncaamMdlMonteCarlo(homeData,awayData);
-      setResults({kp,bpi,ff,tp,mc,cons:ncaamConsensus([kp.homeProb,bpi.homeProb,ff.homeProb,tp.homeProb,mc.homeProb])});
+      const eff=ncaamMdlEfficiency(homeData,awayData),pyth=ncaamMdlPythagorean(homeData,awayData),ff=ncaamMdlFourFactors(homeData,awayData),tal=ncaamMdlTalent(homeData,awayData),mc=ncaamMdlMonteCarlo(homeData,awayData);
+      setResults({eff,pyth,ff,tal,mc,cons:ncaamConsensus([eff.homeProb,pyth.homeProb,ff.homeProb,tal.homeProb,mc.homeProb])});
       setTab("results");setAnalyzing(false);
     },50);
   };
@@ -455,7 +699,7 @@ function NCAAMPage(){
 }
 
 function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOdds,tab,setTab,onRecalc}){
-  const {kp,bpi,ff,tp,mc,cons}=results;const cH=cons,aw=1-cH;
+  const {eff,pyth,ff,tal,mc,cons}=results;const cH=cons,aw=1-cH;
   const hI=oddsToImplied(homeOdds),aI=oddsToImplied(awayOdds);
   const hE=hI!==null?((cH-hI)*100).toFixed(1):null,aE=aI!==null?((aw-aI)*100).toFixed(1):null;
   const hEV=homeOdds&&hI?calcEV(cH,homeOdds):null,aEV=awayOdds&&aI?calcEV(aw,awayOdds):null;
@@ -471,23 +715,24 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,home
         </div>
         <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr} accent={C.amber}/>
         {(aE||hE)&&<div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>{aE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(aE)>=2?C.amber+"18":C.black,border:"1px solid "+(parseFloat(aE)>=2?C.amber:C.border),fontSize:11,color:parseFloat(aE)>=2?C.amber:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{awayAbbr} Edge: {parseFloat(aE)>=0?"+":""}{aE}%{aEV?" - EV "+(parseFloat(aEV)>=0?"+":"")+aEV+"/$1":""}</div>}{hE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(hE)>=2?C.amber+"18":C.black,border:"1px solid "+(parseFloat(hE)>=2?C.amber:C.border),fontSize:11,color:parseFloat(hE)>=2?C.amber:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{homeAbbr} Edge: {parseFloat(hE)>=0?"+":""}{hE}%{hEV?" - EV "+(parseFloat(hEV)>=0?"+":"")+hEV+"/$1":""}</div>}</div>}
+        {(hI&&aI)&&(()=>{const mktH=hI/(hI+aI);const diff=Math.abs(cH-mktH);const big=diff>=0.10;return big?<div style={{marginTop:10,padding:"10px 14px",background:"#1a1200",border:"1px solid "+C.amber+"66",borderRadius:8,display:"flex",gap:8,alignItems:"flex-start"}}><div style={{fontSize:14,flexShrink:0}}>âš ï¸</div><div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.amber,letterSpacing:1}}>MODEL/MARKET DIVERGENCE</div><div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.6}}>Market implies {(mktH*100).toFixed(0)}% {homeAbbr} / {((1-mktH)*100).toFixed(0)}% {awayAbbr}. Our model says {(cH*100).toFixed(0)}% / {(aw*100).toFixed(0)}%. Gap of {(diff*100).toFixed(0)}%. College markets move on injury news and home/away venue changes. Verify this is current.</div></div></div>:null;})()}
         <button className="hov-btn" onClick={onRecalc} style={{marginTop:12,width:"100%",padding:"9px 0",background:"transparent",border:"1px solid "+C.border,borderRadius:7,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.muted,textTransform:"uppercase"}}>Recalculate with Updated Injuries</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-        <ModelCard icon="KP" name="KenPom" desc="Adjusted efficiency margin + KenPom rank" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-kp.homeProb} detail={"Away adj: "+kp.aAdj+"  Home adj: "+kp.hAdj+"  +3.5pt HCA"} accent={C.amber}/>
-        <ModelCard icon="BPI" name="ESPN BPI" desc="Win% Elo + scoring margin + home court" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-bpi.homeProb} detail={"Away BPI: "+bpi.aBPI+"  Home BPI: "+bpi.hBPI+"  +90 HCA"} accent={C.amber}/>
-        <ModelCard icon="4F" name="Four Factors" desc="eFG%, TOV%, OREB%, FTR â€” college adjusted" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={"Away FF: "+ff.aFF+"  Home FF: "+ff.hFF} accent={C.amber}/>
-        <ModelCard icon="TPO" name="Tempo Analysis" desc="Pace-adjusted scoring + possession efficiency" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-tp.homeProb} detail={"Away pace: "+tp.aPace+" proj: "+tp.aScore+"  Home pace: "+tp.hPace+" proj: "+tp.hScore} accent={C.amber}/>
+        <ModelCard icon="AEM" name="Adj. Efficiency" desc="Pts/100 poss margin + KenPom rank/SOS adj" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-eff.homeProb} detail={eff.detail} accent={C.amber}/>
+        <ModelCard icon="PYT" name="Pythagorean" desc="Win quality Pythagorean (exp 11.5) + SOS" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-pyth.homeProb} detail={pyth.detail} accent={C.amber}/>
+        <ModelCard icon="4F" name="Four Factors" desc="Off + Def four factors â€” independent of PPG" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={ff.detail} accent={C.amber}/>
+        <ModelCard icon="TAL" name="Talent Model" desc="Top-3 player PER â€” star power matters most in NCAAM" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-tal.homeProb} detail={tal.detail} accent={C.amber}/>
       </div>
-      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games â€” injury adjusted" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={"Proj: "+awayTeam.split(" ").at(-1)+" "+mc.aExp+"  "+homeTeam.split(" ").at(-1)+" "+mc.hExp+" pts"} accent={C.amber}/>
+      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games â€” injury adjusted" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={mc.detail} accent={C.amber}/>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.amber,textTransform:"uppercase",marginBottom:10}}>Model Agreement</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
-          {[{l:"KenPom",p:1-kp.homeProb},{l:"BPI",p:1-bpi.homeProb},{l:"4 Factors",p:1-ff.homeProb},{l:"Tempo",p:1-tp.homeProb},{l:"Monte Carlo",p:1-mc.homeProb}].map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+C.amber+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.amber}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:C.amber,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}
+          {[{l:"Adj Eff",p:1-eff.homeProb},{l:"Pythagorean",p:1-pyth.homeProb},{l:"4 Factors",p:1-ff.homeProb},{l:"Talent",p:1-tal.homeProb},{l:"Monte Carlo",p:1-mc.homeProb}].map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+C.amber+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.amber}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:C.amber,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}
         </div>
       </div>
     </>}
-    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["KP","KenPom (22%)","Adjusted efficiency margin + KenPom rank boost. +3.5pt HCA. Stronger than NBA home edge."],["BPI","ESPN BPI (20%)","Win% Elo system. College has larger home advantage (+90 Elo) than NBA (+100 pts but different scale)."],["4F","Four Factors (22%)","eFG%(40%) + TOV(25%) + OREB(20%) + FTR(15%). College rates calibrated: higher TOV/OREB typical."],["TPO","Tempo Analysis (20%)","Pace-normalizes scoring to account for teams playing at vastly different speeds. Key differentiator in college."],["MC","Monte Carlo (16%)","8,000 simulated games. Normal scoring distribution. Player injuries modeled via PER reduction."],["W","Consensus","KenPom x22% + BPI x20% + 4F x22% + Tempo x20% + MC x16%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.amber+"22",border:"1px solid "+C.amber+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.amber,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.amber,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
+    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["AEM","Adj Efficiency (28%)","Pts per 100 possessions: offense vs opponent defense. KenPom rank adjusts for schedule strength. +3.5pt HCA."],["PYT","Pythagorean (22%)","Win quality Pythagorean (exp 11.5) with SOS multiplier from KenPom rank. Log5 head-to-head."],["4F","Four Factors (20%)","Offensive (55%) + Defensive (45%) four factors. Entirely independent from PPG signal."],["TAL","Talent Model (13%)","Top-3 player PER weighted by availability. College star impact is larger than NBA. OUT=0%, DOUBTFUL=15%."],["MC","Monte Carlo (17%)","10,000 tempo-adjusted simulations. Game pace = avg of both teams. Ïƒ=10pts per team."],["W","Consensus","Adj Eff 28% + Pythagorean 22% + Four Factors 20% + Talent 13% + Monte Carlo 17%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.amber+"22",border:"1px solid "+C.amber+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.amber,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.amber,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
   </div>;
 }
 

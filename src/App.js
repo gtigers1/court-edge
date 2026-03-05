@@ -1,5 +1,5 @@
 // v7-ncaam
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 function oddsToImplied(o){if(!o||o==="-"||o==="+")return null;const n=parseInt(o);if(isNaN(n)||n===0)return null;return n>0?100/(n+100):Math.abs(n)/(Math.abs(n)+100);}
 function probToAmerican(p){p=Math.max(0.01,Math.min(0.99,p));return p>=0.5?("-"+Math.round((p/(1-p))*100)):("+"+ Math.round(((1-p)/p)*100));}
@@ -48,6 +48,34 @@ function Pill({label,color}){return <span style={{padding:"2px 8px",borderRadius
 function OddsPill({prob,accent}){const ac=accent||C.teal,fav=prob>=.5;return <div style={{padding:"10px 18px",borderRadius:8,textAlign:"center",background:fav?ac+"18":C.black,border:"1.5px solid "+(fav?ac:C.border),minWidth:80}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:fav?ac:C.white}}>{probToAmerican(prob)}</div><div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginTop:1}}>Fair odds</div></div>;}
 function SectionHeader({label,accent,right}){return <div style={{padding:"10px 16px",background:"linear-gradient(90deg,"+(accent||C.copper)+"22,transparent)",borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:8}}><div style={{width:3,height:16,borderRadius:2,background:accent||C.copper}}/><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1.5,color:C.white,textTransform:"uppercase"}}>{label}</span>{right&&<div style={{marginLeft:"auto"}}>{right}</div>}</div>;}
 function WinBar({awayProb,awayAbbr,homeAbbr,accent}){const ac=accent||C.teal;return <div style={{marginTop:8}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:awayProb>.5?ac:C.muted}}>{awayAbbr} {(awayProb*100).toFixed(1)}%</span><span style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:(1-awayProb)>.5?ac:C.muted}}>{(100-awayProb*100).toFixed(1)}% {homeAbbr}</span></div><div style={{height:6,borderRadius:3,background:C.border,overflow:"hidden"}}><div style={{height:"100%",width:(awayProb*100)+"%",background:"linear-gradient(90deg,"+ac+"99,"+ac+")",borderRadius:3,transition:"width .6s ease"}}/></div></div>;}
+
+function TeamSelect({items,getLabel,getSub,getId,displayValue,onSelect,accent,disabled,placeholder}){
+  const [val,setVal]=useState(displayValue||"");
+  const [open,setOpen]=useState(false);
+  const ac=accent||C.teal;
+  useEffect(()=>{setVal(displayValue||"");},[displayValue]);
+  const filtered=items.filter(item=>{const l=getLabel(item),s=getSub?getSub(item):"";return(l+" "+s).toLowerCase().includes(val.toLowerCase());});
+  const show=open?(val===displayValue||val===""?items:filtered):[];
+  return <div style={{position:"relative"}}>
+    <input value={val} disabled={disabled} placeholder={placeholder||"Search team..."}
+      onChange={e=>{setVal(e.target.value);setOpen(true);}}
+      onFocus={e=>{e.target.select();setOpen(true);}}
+      onBlur={()=>setTimeout(()=>setOpen(false),180)}
+      onKeyDown={e=>{if(e.key==="Escape"){setOpen(false);setVal(displayValue||"");}}}
+      style={{width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+(open?ac:C.border),borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif",transition:"border-color .15s",cursor:disabled?"not-allowed":"text"}}/>
+    {open&&<div style={{position:"absolute",top:"calc(100% + 4px)",left:0,right:0,maxHeight:220,overflowY:"auto",background:C.card,border:"1px solid "+ac+"66",borderRadius:8,zIndex:500,boxShadow:"0 8px 32px #00000077"}}>
+      {show.length===0?<div style={{padding:"10px 14px",fontSize:11,color:C.muted}}>No teams found</div>
+      :show.map(item=>{const label=getLabel(item),sub=getSub?getSub(item):null,id=getId?getId(item):label,sel=displayValue===label;
+        return <div key={id} onMouseDown={e=>{e.preventDefault();setVal(label);setOpen(false);onSelect(item);}}
+          onMouseEnter={e=>e.currentTarget.style.background=sel?ac+"44":C.dark}
+          onMouseLeave={e=>e.currentTarget.style.background=sel?ac+"22":"transparent"}
+          style={{padding:"9px 14px",cursor:"pointer",background:sel?ac+"22":"transparent",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",transition:"background .1s"}}>
+          <span style={{fontFamily:"'Barlow',sans-serif",fontSize:13,color:sel?ac:C.white}}>{label}</span>
+          {sub&&<span style={{fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{sub}</span>}
+        </div>;})}
+    </div>}
+  </div>;
+}
 
 function RosterPanel({teamName,abbr,teamData,onCycle,sport,accent,loading}){
   const ac=accent||C.teal;
@@ -240,11 +268,11 @@ function nbaConsensus(ps,mkt){
 
 function NBAPage(){
   const [awayTeam,setAwayTeam]=useState("");const [homeTeam,setHomeTeam]=useState("");const [awayOdds,setAwayOdds]=useState("");const [homeOdds,setHomeOdds]=useState("");const [homeSpread,setHomeSpread]=useState("");const [postedTotal,setPostedTotal]=useState("");const [awayData,setAwayData]=useState(null);const [homeData,setHomeData]=useState(null);const [awayLoading,setAwayLoading]=useState(false);const [homeLoading,setHomeLoading]=useState(false);const [awayError,setAwayError]=useState("");const [homeError,setHomeError]=useState("");const [results,setResults]=useState(null);const [tab,setTab]=useState("results");const [analyzing,setAnalyzing]=useState(false);const [oddsLoading,setOddsLoading]=useState(false);const [oddsError,setOddsError]=useState("");const [sharpAlert,setSharpAlert]=useState(null);
-  const [gameTime,setGameTime]=useState(null);const [awayMsg,setAwayMsg]=useState("");const [homeMsg,setHomeMsg]=useState("");const [awayFilter,setAwayFilter]=useState("");const [homeFilter,setHomeFilter]=useState("");
+  const [gameTime,setGameTime]=useState(null);const [awayMsg,setAwayMsg]=useState("");const [homeMsg,setHomeMsg]=useState("");
   const LOAD_MSGS=["Fetching ESPN roster...","Pulling schedule data...","Analyzing with Claude...","Almost done..."];
   const fetchTeam=async(team,side)=>{const setL=side==="away"?setAwayLoading:setHomeLoading;const setD=side==="away"?setAwayData:setHomeData;const setE=side==="away"?setAwayError:setHomeError;const setM=side==="away"?setAwayMsg:setHomeMsg;setL(true);setD(null);setE("");setResults(null);setM(LOAD_MSGS[0]);let mi=0;const iv=setInterval(()=>{mi=Math.min(mi+1,LOAD_MSGS.length-1);setM(LOAD_MSGS[mi]);},2500);try{const r=await fetch("/api/team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({team,sport:"nba"})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);setD(d);}catch(e){setE(e.message);}clearInterval(iv);setM("");setL(false);};
   const fetchOdds=async()=>{setOddsLoading(true);setOddsError("");setSharpAlert(null);try{const r=await fetch("/api/odds",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sport:"nba",homeTeam,awayTeam})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);if(d.homeML)setHomeOdds(d.homeML);if(d.awayML)setAwayOdds(d.awayML);if(d.homeSpread)setHomeSpread(d.homeSpread);if(d.total)setPostedTotal(d.total);if(d.sharpIndicator)setSharpAlert(d.sharpIndicator);if(d.gameTime)setGameTime(d.gameTime);}catch(e){setOddsError(e.message);}setOddsLoading(false);};
-  const resetAll=()=>{setAwayTeam("");setHomeTeam("");setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");setAwayFilter("");setHomeFilter("");};
+  const resetAll=()=>{setAwayTeam("");setHomeTeam("");setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");};
   const cyclePlayer=(side,name)=>{const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];if(!g)return;s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});};
   const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const pyth=nbaMdlPythagorean(homeData,awayData),net=nbaMdlNetRating(homeData,awayData),ff=nbaMdlFourFactors(homeData,awayData),star=nbaMdlStarPower(homeData,awayData),mc=nbaMdlMonteCarlo(homeData,awayData);const mkt=devigged(homeOdds,awayOdds);const hElo=homeData.elo||1500,aElo=awayData.elo||1500;const eloProb=1/(1+Math.pow(10,(aElo-hElo)/400));const h2hG=(homeData.games||[]).filter(g=>g.opp===awayData.espn_id);const h2hW=h2hG.filter(g=>g.win).length;const h2hProb=h2hG.length>=2?h2hW/h2hG.length:null;const divGame=!!(NBA_DIV[homeTeam]&&NBA_DIV[homeTeam]===NBA_DIV[awayTeam]);const altBoost=ALTITUDE_HOME[homeTeam]||0;const hTZ=TZ_OFF[NBA_TZ[homeTeam]]??1.5,aTZ=TZ_OFF[NBA_TZ[awayTeam]]??1.5;const tzAdj=Math.max(-0.02,Math.min(0.04,(hTZ-aTZ)*0.010));let cons=nbaConsensus([pyth.homeProb,net.homeProb,ff.homeProb,star.homeProb,mc.homeProb],mkt);if(altBoost)cons=Math.min(0.97,Math.max(0.03,cons+altBoost));if(divGame)cons=cons*0.92+0.5*0.08;cons=Math.min(0.97,Math.max(0.03,cons+tzAdj));if(h2hProb!==null)cons=cons*0.94+h2hProb*0.06;cons=Math.min(0.97,Math.max(0.03,cons*0.90+eloProb*0.10));const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);const modelSpread=(hExpN-aExpN).toFixed(1);const modelTotal=(hExpN+aExpN).toFixed(1);setResults({pyth,net,ff,star,mc,mkt,cons,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread,modelTotal});setTab("results");setAnalyzing(false);},50);};
   const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
@@ -252,12 +280,20 @@ function NBAPage(){
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
       <SectionHeader label="Step 1 - Select Away Team" accent={C.teal} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.teal}/>}/>
-      <div style={{padding:14}}><div style={{marginBottom:6}}><input style={{...inp,marginBottom:6}} placeholder="Search team..." value={awayFilter} onChange={e=>setAwayFilter(e.target.value)}/><select style={{...inp,cursor:"pointer"}} value={awayTeam} onChange={e=>{const t=e.target.value;setAwayTeam(t);setAwayData(null);setResults(null);setAwayFilter("");if(t)fetchTeam(t,"away");}}><option value="">Select away team...</option>{NBA_TEAMS.filter(t=>t.toLowerCase().includes(awayFilter.toLowerCase())).map(t=><option key={t} value={t}>{t}</option>)}</select></div>{awayLoading&&awayMsg&&<div style={{marginTop:6,fontSize:11,color:C.teal,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{awayMsg}</span></div>}{awayError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{awayError}</div>}</div>
+      <div style={{padding:14}}>
+        <TeamSelect items={NBA_TEAMS} getLabel={t=>t} displayValue={awayTeam} accent={C.teal} placeholder="Search NBA team..." disabled={awayLoading} onSelect={t=>{setAwayTeam(t);setAwayData(null);setResults(null);fetchTeam(t,"away");}}/>
+        {awayLoading&&awayMsg&&<div style={{marginTop:6,fontSize:11,color:C.teal,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{awayMsg}</span></div>}
+        {awayError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{awayError}</div>}
+      </div>
       {(awayLoading||awayData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={awayTeam} abbr={awayAbbr} teamData={awayData} onCycle={n=>cyclePlayer("away",n)} sport="nba" accent={C.teal} loading={awayLoading}/></div>}
     </div>
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
       <SectionHeader label="Step 2 - Select Home Team" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
-      <div style={{padding:14}}><div style={{marginBottom:6}}><input style={{...inp,marginBottom:6}} placeholder="Search team..." value={homeFilter} onChange={e=>setHomeFilter(e.target.value)}/><select style={{...inp,cursor:"pointer"}} value={homeTeam} onChange={e=>{const t=e.target.value;setHomeTeam(t);setHomeData(null);setResults(null);setHomeFilter("");if(t)fetchTeam(t,"home");}}><option value="">Select home team...</option>{NBA_TEAMS.filter(t=>t.toLowerCase().includes(homeFilter.toLowerCase())).map(t=><option key={t} value={t}>{t}</option>)}</select></div>{homeLoading&&homeMsg&&<div style={{marginTop:6,fontSize:11,color:C.copper,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{homeMsg}</span></div>}{homeError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{homeError}</div>}</div>
+      <div style={{padding:14}}>
+        <TeamSelect items={NBA_TEAMS} getLabel={t=>t} displayValue={homeTeam} accent={C.copper} placeholder="Search NBA team..." disabled={homeLoading} onSelect={t=>{setHomeTeam(t);setHomeData(null);setResults(null);fetchTeam(t,"home");}}/>
+        {homeLoading&&homeMsg&&<div style={{marginTop:6,fontSize:11,color:C.copper,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{homeMsg}</span></div>}
+        {homeError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{homeError}</div>}
+      </div>
       {(homeLoading||homeData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={homeTeam} abbr={homeAbbr} teamData={homeData} onCycle={n=>cyclePlayer("home",n)} sport="nba" accent={C.copper} loading={homeLoading}/></div>}
     </div>
     {bothLoaded&&<div className="fade-in" style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
@@ -428,11 +464,11 @@ function nhlConsensus(ps,mkt){
 
 function NHLPage(){
   const [awayTeam,setAwayTeam]=useState("");const [homeTeam,setHomeTeam]=useState("");const [awayOdds,setAwayOdds]=useState("");const [homeOdds,setHomeOdds]=useState("");const [homeSpread,setHomeSpread]=useState("");const [postedTotal,setPostedTotal]=useState("");const [awayData,setAwayData]=useState(null);const [homeData,setHomeData]=useState(null);const [awayLoading,setAwayLoading]=useState(false);const [homeLoading,setHomeLoading]=useState(false);const [awayError,setAwayError]=useState("");const [homeError,setHomeError]=useState("");const [results,setResults]=useState(null);const [tab,setTab]=useState("results");const [analyzing,setAnalyzing]=useState(false);const [oddsLoading,setOddsLoading]=useState(false);const [oddsError,setOddsError]=useState("");const [sharpAlert,setSharpAlert]=useState(null);
-  const [gameTime,setGameTime]=useState(null);const [awayMsg,setAwayMsg]=useState("");const [homeMsg,setHomeMsg]=useState("");const [awayFilter,setAwayFilter]=useState("");const [homeFilter,setHomeFilter]=useState("");
+  const [gameTime,setGameTime]=useState(null);const [awayMsg,setAwayMsg]=useState("");const [homeMsg,setHomeMsg]=useState("");
   const LOAD_MSGS=["Fetching ESPN roster...","Pulling schedule data...","Analyzing with Claude...","Almost done..."];
   const fetchTeam=async(team,side)=>{const setL=side==="away"?setAwayLoading:setHomeLoading;const setD=side==="away"?setAwayData:setHomeData;const setE=side==="away"?setAwayError:setHomeError;const setM=side==="away"?setAwayMsg:setHomeMsg;setL(true);setD(null);setE("");setResults(null);setM(LOAD_MSGS[0]);let mi=0;const iv=setInterval(()=>{mi=Math.min(mi+1,LOAD_MSGS.length-1);setM(LOAD_MSGS[mi]);},2500);try{const r=await fetch("/api/team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({team,sport:"nhl"})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);setD(d);}catch(e){setE(e.message);}clearInterval(iv);setM("");setL(false);};
   const fetchOdds=async()=>{setOddsLoading(true);setOddsError("");setSharpAlert(null);try{const r=await fetch("/api/odds",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sport:"nhl",homeTeam,awayTeam})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);if(d.homeML)setHomeOdds(d.homeML);if(d.awayML)setAwayOdds(d.awayML);if(d.homeSpread)setHomeSpread(d.homeSpread);if(d.total)setPostedTotal(d.total);if(d.sharpIndicator)setSharpAlert(d.sharpIndicator);if(d.gameTime)setGameTime(d.gameTime);}catch(e){setOddsError(e.message);}setOddsLoading(false);};
-  const resetAll=()=>{setAwayTeam("");setHomeTeam("");setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");setAwayFilter("");setHomeFilter("");};
+  const resetAll=()=>{setAwayTeam("");setHomeTeam("");setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");};
   const cyclePlayer=(side,name)=>{const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];if(!g)return;if(name==="__goalie__"){s({...g,goalie:{...g.goalie,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(g.goalie.status||"PLAYING")+1)%4]}});}else{s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});}};
   const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const gd=nhlMdlGoalDiff(homeData,awayData),gl=nhlMdlGoalie(homeData,awayData),st=nhlMdlSpecialTeams(homeData,awayData),sq=nhlMdlShotQuality(homeData,awayData),mc=nhlMdlMonteCarlo(homeData,awayData);const mkt=devigged(homeOdds,awayOdds);const hL=parseFloat(mc.hLambda),aL=parseFloat(mc.aLambda);const modelSpread=(hL-aL).toFixed(2);const modelTotal=(hL+aL).toFixed(2);setResults({gd,gl,st,sq,mc,mkt,cons:nhlConsensus([gd.homeProb,gl.homeProb,st.homeProb,sq.homeProb,mc.homeProb],mkt),modelSpread,modelTotal,hLambda:mc.hLambda,aLambda:mc.aLambda});setTab("results");setAnalyzing(false);},50);};
   const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
@@ -440,12 +476,20 @@ function NHLPage(){
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
       <SectionHeader label="Step 1 - Select Away Team" accent={C.ice} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.ice}/>}/>
-      <div style={{padding:14}}><div style={{marginBottom:6}}><input style={{...inp,marginBottom:6}} placeholder="Search team..." value={awayFilter} onChange={e=>setAwayFilter(e.target.value)}/><select style={{...inp,cursor:"pointer"}} value={awayTeam} onChange={e=>{const t=e.target.value;setAwayTeam(t);setAwayData(null);setResults(null);setAwayFilter("");if(t)fetchTeam(t,"away");}}><option value="">Select away team...</option>{NHL_TEAMS.filter(t=>t.toLowerCase().includes(awayFilter.toLowerCase())).map(t=><option key={t} value={t}>{t}</option>)}</select></div>{awayLoading&&awayMsg&&<div style={{marginTop:6,fontSize:11,color:C.ice,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{awayMsg}</span></div>}{awayError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{awayError}</div>}</div>
+      <div style={{padding:14}}>
+        <TeamSelect items={NHL_TEAMS} getLabel={t=>t} displayValue={awayTeam} accent={C.ice} placeholder="Search NHL team..." disabled={awayLoading} onSelect={t=>{setAwayTeam(t);setAwayData(null);setResults(null);fetchTeam(t,"away");}}/>
+        {awayLoading&&awayMsg&&<div style={{marginTop:6,fontSize:11,color:C.ice,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{awayMsg}</span></div>}
+        {awayError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{awayError}</div>}
+      </div>
       {(awayLoading||awayData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={awayTeam} abbr={awayAbbr} teamData={awayData} onCycle={n=>cyclePlayer("away",n)} sport="nhl" accent={C.ice} loading={awayLoading}/></div>}
     </div>
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
       <SectionHeader label="Step 2 - Select Home Team" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
-      <div style={{padding:14}}><div style={{marginBottom:6}}><input style={{...inp,marginBottom:6}} placeholder="Search team..." value={homeFilter} onChange={e=>setHomeFilter(e.target.value)}/><select style={{...inp,cursor:"pointer"}} value={homeTeam} onChange={e=>{const t=e.target.value;setHomeTeam(t);setHomeData(null);setResults(null);setHomeFilter("");if(t)fetchTeam(t,"home");}}><option value="">Select home team...</option>{NHL_TEAMS.filter(t=>t.toLowerCase().includes(homeFilter.toLowerCase())).map(t=><option key={t} value={t}>{t}</option>)}</select></div>{homeLoading&&homeMsg&&<div style={{marginTop:6,fontSize:11,color:C.copper,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{homeMsg}</span></div>}{homeError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{homeError}</div>}</div>
+      <div style={{padding:14}}>
+        <TeamSelect items={NHL_TEAMS} getLabel={t=>t} displayValue={homeTeam} accent={C.copper} placeholder="Search NHL team..." disabled={homeLoading} onSelect={t=>{setHomeTeam(t);setHomeData(null);setResults(null);fetchTeam(t,"home");}}/>
+        {homeLoading&&homeMsg&&<div style={{marginTop:6,fontSize:11,color:C.copper,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{homeMsg}</span></div>}
+        {homeError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{homeError}</div>}
+      </div>
       {(homeLoading||homeData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={homeTeam} abbr={homeAbbr} teamData={homeData} onCycle={n=>cyclePlayer("home",n)} sport="nhl" accent={C.copper} loading={homeLoading}/></div>}
     </div>
     {bothLoaded&&<div className="fade-in" style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
@@ -711,7 +755,6 @@ function NCAAMPage(){
   const [sharpAlert,setSharpAlert]=useState(null);
   const [gameTime,setGameTime]=useState(null);
   const [awayMsg,setAwayMsg]=useState("");const [homeMsg,setHomeMsg]=useState("");
-  const [awayFilter,setAwayFilter]=useState("");const [homeFilter,setHomeFilter]=useState("");
   const LOAD_MSGS=["Fetching ESPN roster...","Pulling schedule data...","Analyzing with Claude...","Almost done..."];
 
   const fetchTeam=async(t,side)=>{
@@ -731,7 +774,7 @@ function NCAAMPage(){
   };
 
   const fetchOdds=async()=>{setOddsLoading(true);setOddsError("");setSharpAlert(null);try{const r=await fetch("/api/odds",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sport:"ncaam",homeTeam:homeTeam?.name||"",awayTeam:awayTeam?.name||""})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);if(d.homeML)setHomeOdds(d.homeML);if(d.awayML)setAwayOdds(d.awayML);if(d.homeSpread)setHomeSpread(d.homeSpread);if(d.total)setPostedTotal(d.total);if(d.sharpIndicator)setSharpAlert(d.sharpIndicator);if(d.gameTime)setGameTime(d.gameTime);}catch(e){setOddsError(e.message);}setOddsLoading(false);};
-  const resetAll=()=>{setAwayTeam(null);setHomeTeam(null);setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");setAwayFilter("");setHomeFilter("");};
+  const resetAll=()=>{setAwayTeam(null);setHomeTeam(null);setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");};
 
   const cyclePlayer=(side,name)=>{
     const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];
@@ -762,11 +805,7 @@ function NCAAMPage(){
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
       <SectionHeader label="Step 1 - Select Away Team" accent={C.amber} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.amber}/>}/>
       <div style={{padding:14}}>
-        <input style={{...inp,marginBottom:6}} placeholder="Search team..." value={awayFilter} onChange={e=>setAwayFilter(e.target.value)}/>
-        <select style={{...inp,cursor:"pointer"}} value={awayTeam?.id||""} onChange={e=>{const t=NCAAM_TEAMS.find(x=>x.id===e.target.value)||null;setAwayTeam(t);setAwayData(null);setResults(null);setAwayFilter("");if(t)fetchTeam(t,"away");}}>
-          <option value="">Select away team...</option>
-          {NCAAM_TEAMS.filter(t=>t.name.toLowerCase().includes(awayFilter.toLowerCase())||t.conf.toLowerCase().includes(awayFilter.toLowerCase())).map(t=><option key={t.id} value={t.id}>{t.name} ({t.conf})</option>)}
-        </select>
+        <TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={awayTeam?.name||""} accent={C.amber} placeholder="Search team or conference..." disabled={awayLoading} onSelect={t=>{setAwayTeam(t);setAwayData(null);setResults(null);fetchTeam(t,"away");}}/>
         {awayLoading&&awayMsg&&<div style={{marginTop:6,fontSize:11,color:C.amber,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{awayMsg}</span></div>}
         {awayError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{awayError}</div>}
       </div>
@@ -777,11 +816,7 @@ function NCAAMPage(){
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
       <SectionHeader label="Step 2 - Select Home Team" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
       <div style={{padding:14}}>
-        <input style={{...inp,marginBottom:6}} placeholder="Search team..." value={homeFilter} onChange={e=>setHomeFilter(e.target.value)}/>
-        <select style={{...inp,cursor:"pointer"}} value={homeTeam?.id||""} onChange={e=>{const t=NCAAM_TEAMS.find(x=>x.id===e.target.value)||null;setHomeTeam(t);setHomeData(null);setResults(null);setHomeFilter("");if(t)fetchTeam(t,"home");}}>
-          <option value="">Select home team...</option>
-          {NCAAM_TEAMS.filter(t=>t.name.toLowerCase().includes(homeFilter.toLowerCase())||t.conf.toLowerCase().includes(homeFilter.toLowerCase())).map(t=><option key={t.id} value={t.id}>{t.name} ({t.conf})</option>)}
-        </select>
+        <TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={homeTeam?.name||""} accent={C.copper} placeholder="Search team or conference..." disabled={homeLoading} onSelect={t=>{setHomeTeam(t);setHomeData(null);setResults(null);fetchTeam(t,"home");}}/>
         {homeLoading&&homeMsg&&<div style={{marginTop:6,fontSize:11,color:C.copper,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{homeMsg}</span></div>}
         {homeError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{homeError}</div>}
       </div>

@@ -67,8 +67,8 @@ export default async function handler(req, res) {
         max_tokens: 800,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         messages: [{ role: "user", content: sport === "nhl"
-          ? team + " 2025-26 NHL season wins losses goals-per-game goals-against power-play% penalty-kill% top scorers points goals assists"
-          : team + " 2025-26 NBA season wins losses points-per-game opponent-points top players individual scoring averages ppg"
+          ? team + " 2025-26 NHL season wins losses goals-per-game goals-against power-play% penalty-kill% shots-per-game top scorers points goals assists last 10 games"
+          : team + " 2025-26 NBA season wins losses points-per-game opponent-points-per-game eFG% turnover-rate offensive-rebound-rate free-throw-rate last 10 games top players scoring rebounds assists averages"
         }]
       })
     });
@@ -77,7 +77,7 @@ export default async function handler(req, res) {
 
     // Step 5: Sonnet formats with exact ESPN names + stats
     const playerList = playerNames.map(p => p.name + (sport === "nhl" ? " (" + p.position + ")" : "")).join(", ");
-    const nbaSchema = '{"wins":0,"losses":0,"ppg":112,"opp":110,"efg_pct":0.52,"tov_rate":13,"oreb_pct":0.25,"ftr":0.22,"opp_efg_pct":0.52,"opp_tov_rate":13,"opp_oreb_pct":0.25,"opp_ftr":0.22,"last10":"5-5","last10_ppg":112,"last10_opp":110,"roster":[{"name":"exact name from list","ppg":20.0,"per":17.0,"role":"STAR","status":"PLAYING"}]}';
+    const nbaSchema = '{"wins":0,"losses":0,"ppg":112,"opp":110,"efg_pct":0.52,"tov_rate":13,"oreb_pct":0.25,"ftr":0.22,"opp_efg_pct":0.52,"opp_tov_rate":13,"opp_oreb_pct":0.25,"opp_ftr":0.22,"last10":"5-5","last10_ppg":112,"last10_opp":110,"roster":[{"name":"exact name from list","ppg":20.0,"rpg":5.0,"apg":3.0,"per":17.0,"role":"STAR","status":"PLAYING"}]}';
     const nhlSchema = '{"wins":0,"losses":0,"otl":0,"points":0,"gf_pg":3.0,"ga_pg":2.8,"shots_pg":30,"shots_against_pg":28,"pp_pct":22,"pk_pct":80,"last10_gf":3.0,"last10_ga":2.8,"goalie":{"name":"exact goalie name","save_pct":0.910,"gaa":2.80,"status":"PLAYING"},"roster":[{"name":"exact name","goals":10,"assists":20,"points":30,"plus_minus":5,"position":"LW","role":"KEY","status":"PLAYING"}]}';
 
     const fmt = await fetch("https://api.anthropic.com/v1/messages", {
@@ -87,7 +87,7 @@ export default async function handler(req, res) {
         model: "claude-sonnet-4-20250514",
         max_tokens: 2500,
         system: "Output only a single raw JSON object. No markdown, no explanation, no code fences.",
-        messages: [{ role: "user", content: "Build JSON for " + team + " " + sport.toUpperCase() + ".\n\nALL players (use EXACT names, include ALL of them):\n" + playerList + "\n\nStats data:\n" + searchText + "\n\nSchema:\n" + (sport === "nhl" ? nhlSchema : nbaSchema) + "\n\nCRITICAL: Include EVERY player in the list above in the roster array. " + (sport === "nhl" ? "Separate goalies from skaters - put starting goalie in goalie field, rest in roster. role=STAR if points>40, KEY if points>20, else ROLE. Use position from the list." : "role=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.85.") }]
+        messages: [{ role: "user", content: "Build JSON for " + team + " " + sport.toUpperCase() + ".\n\nALL players (use EXACT names, include ALL of them):\n" + playerList + "\n\nStats data:\n" + searchText + "\n\nSchema:\n" + (sport === "nhl" ? nhlSchema : nbaSchema) + "\n\nCRITICAL: Include EVERY player in the list above in the roster array. " + (sport === "nhl" ? "Separate goalies from skaters - put starting goalie in goalie field, rest in roster. role=STAR if points>40, KEY if points>20, else ROLE. Use position from the list." : "role=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.9+rpg*0.3+apg*0.5 (e.g. 25ppg/10rpg/8apg = 30.5). Include rpg and apg for each player.") }]
       })
     });
     const fd = await fmt.json();
@@ -119,7 +119,7 @@ export default async function handler(req, res) {
       parsed.opp_oreb_pct=parsed.opp_oreb_pct||0.26; parsed.opp_ftr=parsed.opp_ftr||0.22;
       parsed.last10=parsed.last10||"5-5"; parsed.last10_ppg=parsed.last10_ppg||parsed.ppg;
       parsed.last10_opp=parsed.last10_opp||parsed.opp;
-      parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",ppg:p.ppg||10,per:p.per||(p.ppg||10)*0.85,role:p.role||"ROLE",status:"PLAYING"}));
+      parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",ppg:p.ppg||10,rpg:p.rpg||3,apg:p.apg||1,per:p.per||((p.ppg||10)*0.9+(p.rpg||3)*0.3+(p.apg||1)*0.5),role:p.role||"ROLE",status:"PLAYING"}));
     }
     return res.status(200).json(parsed);
   } catch (err) {

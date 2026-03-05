@@ -32,14 +32,24 @@ export default async function handler(req, res) {
     const wins = getStat("wins") || parseInt(teamJson?.team?.record?.items?.[0]?.summary?.split("-")[0]) || 30;
     const losses = getStat("losses") || parseInt(teamJson?.team?.record?.items?.[0]?.summary?.split("-")[1]) || 20;
 
-    // Step 2b: Fetch last-10 game results from ESPN schedule (more reliable than search)
+    // Step 2b: Fetch schedule for L10, rest days, and home/away splits
     const teamNumId = String(teamJson?.team?.id || "");
     let l10ppg = null, l10opp = null;
+    let daysSinceLastGame = 2; // default: assume rested
+    let hSplit = null, aSplit = null; // home/away scoring splits
     try {
       const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/schedule`);
       const schedJson = await schedResp.json();
       const completed = (schedJson?.events || []).filter(e => e.competitions?.[0]?.status?.type?.completed === true);
       const last10 = completed.slice(-10);
+
+      // Rest: days since last game
+      if (completed.length > 0) {
+        const lastDate = new Date(completed[completed.length - 1].date);
+        daysSinceLastGame = Math.max(0, Math.floor((new Date() - lastDate) / (1000 * 60 * 60 * 24)));
+      }
+
+      // L10 scoring averages
       let sumFor = 0, sumAgainst = 0, count = 0;
       for (const ev of last10) {
         const comp = ev.competitions?.[0];
@@ -53,6 +63,21 @@ export default async function handler(req, res) {
         }
       }
       if (count >= 3) { l10ppg = sumFor / count; l10opp = sumAgainst / count; }
+
+      // Home/Away splits (full season)
+      let hSF = 0, hAG = 0, hCnt = 0, aSF = 0, aAG = 0, aCnt = 0;
+      for (const ev of completed) {
+        const comp = ev.competitions?.[0];
+        if (!comp) continue;
+        const ours = comp.competitors?.find(c => String(c.id) === teamNumId);
+        const theirs = comp.competitors?.find(c => String(c.id) !== teamNumId);
+        if (!ours || !theirs || ours.score == null || theirs.score == null) continue;
+        const s = parseFloat(ours.score) || 0, t = parseFloat(theirs.score) || 0;
+        if (ours.homeAway === "home") { hSF += s; hAG += t; hCnt++; }
+        else { aSF += s; aAG += t; aCnt++; }
+      }
+      if (hCnt >= 8) hSplit = { sf: hSF / hCnt, ag: hAG / hCnt };
+      if (aCnt >= 8) aSplit = { sf: aSF / aCnt, ag: aAG / aCnt };
     } catch(_) {}
 
     // Step 3: Extract players from ESPN roster API
@@ -157,15 +182,18 @@ export default async function handler(req, res) {
     if (!parsed) return res.status(500).json({ error: "Parse failed", espnPlayerCount: playerNames.length, raw: raw.slice(0,200) });
 
     // Normalize
+    parsed.rest = daysSinceLastGame;
     if (sport === "nhl") {
       parsed.wins=parsed.wins||wins; parsed.losses=parsed.losses||losses; parsed.otl=parsed.otl??5;
       parsed.points=parsed.points||(parsed.wins*2+parsed.otl); parsed.gf_pg=parsed.gf_pg||3.0;
       parsed.ga_pg=parsed.ga_pg||2.8; parsed.shots_pg=parsed.shots_pg||30;
       parsed.shots_against_pg=parsed.shots_against_pg||28; parsed.pp_pct=parsed.pp_pct||20;
       parsed.pk_pct=parsed.pk_pct||80;
-      // Prefer ESPN schedule data for L10; NHL goals are lower numbers so divide by 1 (already per-game if count>=3)
       parsed.last10_gf=l10ppg!=null?parseFloat(l10ppg.toFixed(2)):(parsed.last10_gf||parsed.gf_pg);
       parsed.last10_ga=l10opp!=null?parseFloat(l10opp.toFixed(2)):(parsed.last10_ga||parsed.ga_pg);
+      // Home/away goal splits
+      if (hSplit) { parsed.home_gf=parseFloat(hSplit.sf.toFixed(2)); parsed.home_ga=parseFloat(hSplit.ag.toFixed(2)); }
+      if (aSplit) { parsed.away_gf=parseFloat(aSplit.sf.toFixed(2)); parsed.away_ga=parseFloat(aSplit.ag.toFixed(2)); }
       parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",goals:p.goals??0,assists:p.assists??0,points:p.points??0,plus_minus:p.plus_minus??0,position:p.position||"F",role:p.role||"ROLE",status:"PLAYING"}));
       if(parsed.goalie){parsed.goalie.status="PLAYING";}
     } else {
@@ -176,9 +204,11 @@ export default async function handler(req, res) {
       parsed.opp_efg_pct=parsed.opp_efg_pct||0.52; parsed.opp_tov_rate=parsed.opp_tov_rate||13.5;
       parsed.opp_oreb_pct=parsed.opp_oreb_pct||0.26; parsed.opp_ftr=parsed.opp_ftr||0.22;
       parsed.last10=parsed.last10||"5-5";
-      // Prefer ESPN schedule data (actual game scores) over search-derived estimates
       parsed.last10_ppg=l10ppg!=null?parseFloat(l10ppg.toFixed(1)):(parsed.last10_ppg||parsed.ppg);
       parsed.last10_opp=l10opp!=null?parseFloat(l10opp.toFixed(1)):(parsed.last10_opp||parsed.opp);
+      // Home/away scoring splits
+      if (hSplit) { parsed.home_ppg=parseFloat(hSplit.sf.toFixed(1)); parsed.home_opp=parseFloat(hSplit.ag.toFixed(1)); }
+      if (aSplit) { parsed.away_ppg=parseFloat(aSplit.sf.toFixed(1)); parsed.away_opp=parseFloat(aSplit.ag.toFixed(1)); }
       parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",ppg:p.ppg||10,rpg:p.rpg||3,apg:p.apg||1,per:p.per||((p.ppg||10)*0.9+(p.rpg||3)*0.3+(p.apg||1)*0.5),role:p.role||"ROLE",status:"PLAYING"}));
     }
     return res.status(200).json(parsed);

@@ -91,22 +91,37 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "ESPN roster empty for " + team, rosterUrl });
     }
 
-    // Step 4: Get stats via Haiku search (only stats, not names - we have those)
-    const search = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 800,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{ role: "user", content: sport === "nhl"
-          ? team + " 2025-26 NHL season wins losses goals-per-game goals-against power-play% penalty-kill% shots-per-game top scorers points goals assists expected starting goalie tonight injury report"
-          : team + " 2025-26 NBA season wins losses points-per-game opponent-points-per-game eFG% turnover-rate offensive-rebound-rate free-throw-rate last 10 games top players scoring rebounds assists averages"
-        }]
+    // Step 4: Run two Haiku searches in parallel — team stats + individual player stats
+    const nameList = playerNames.map(p => p.name).join(", ");
+    const [search, playerSearch] = await Promise.all([
+      fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 800,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [{ role: "user", content: sport === "nhl"
+            ? team + " 2025-26 NHL season wins losses goals-per-game goals-against power-play% penalty-kill% shots-per-game top scorers points goals assists expected starting goalie tonight injury report"
+            : team + " 2025-26 NBA season wins losses points-per-game opponent-points-per-game eFG% turnover-rate offensive-rebound-rate free-throw-rate last 10 games top players scoring rebounds assists averages"
+          }]
+        })
+      }),
+      sport === "nhl" ? Promise.resolve(null) : fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1000,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [{ role: "user", content: team + " 2025-26 NBA player stats per game: " + nameList + ". Find PPG RPG APG for each player this season." }]
+        })
       })
-    });
+    ]);
     const sd = await search.json();
-    const searchText = (sd.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 2000);
+    const searchText = (sd.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 1500);
+    const psd = playerSearch ? await playerSearch.json() : null;
+    const playerSearchText = psd ? (psd.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 1500) : "";
 
     // Step 5: Sonnet formats with exact ESPN names + stats
     // Include any ESPN-sourced stats as hints so Sonnet uses exact values instead of guessing
@@ -128,7 +143,7 @@ export default async function handler(req, res) {
         model: "claude-sonnet-4-20250514",
         max_tokens: 2500,
         system: "Output only a single raw JSON object. No markdown, no explanation, no code fences.",
-        messages: [{ role: "user", content: "Build JSON for " + team + " " + sport.toUpperCase() + ".\n\nALL players (use EXACT names, include ALL of them):\n" + playerList + "\n\nStats data:\n" + searchText + "\n\nSchema:\n" + (sport === "nhl" ? nhlSchema : nbaSchema) + "\n\nCRITICAL: Include EVERY player in the list above in the roster array. " + (sport === "nhl" ? "Separate goalies from skaters - put starting goalie in goalie field, rest in roster. role=STAR if points>40, KEY if points>20, else ROLE. Use position from the list." : "Players shown with [PPG:X RPG:Y APG:Z] have CONFIRMED stats — copy those values EXACTLY. Only estimate stats for players with no brackets. role=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.9+rpg*0.3+apg*0.5 (e.g. 25ppg/10rpg/8apg = 30.5). Include rpg and apg for each player.") }]
+        messages: [{ role: "user", content: "Build JSON for " + team + " " + sport.toUpperCase() + ".\n\nALL players (use EXACT names, include ALL of them):\n" + playerList + "\n\nTeam stats:\n" + searchText + (playerSearchText ? "\n\nPlayer stats:\n" + playerSearchText : "") + "\n\nSchema:\n" + (sport === "nhl" ? nhlSchema : nbaSchema) + "\n\nCRITICAL: Include EVERY player in the list above in the roster array. " + (sport === "nhl" ? "Separate goalies from skaters - put starting goalie in goalie field, rest in roster. role=STAR if points>40, KEY if points>20, else ROLE. Use position from the list." : "Players shown with [PPG:X RPG:Y APG:Z] have CONFIRMED stats — copy those values EXACTLY. For all others use the Player stats section above to find real values — do NOT make up numbers. role=STAR if ppg>20, KEY if ppg>11, else ROLE. per=ppg*0.9+rpg*0.3+apg*0.5 (e.g. 25ppg/10rpg/8apg = 30.5). Include rpg and apg for each player.") }]
       })
     });
     const fd = await fmt.json();

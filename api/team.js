@@ -10,6 +10,8 @@ export default async function handler(req, res) {
   // ESPN API team slugs (confirmed from espn.com)
   const NBA_SLUG = {"Atlanta Hawks":"atl","Boston Celtics":"bos","Brooklyn Nets":"bkn","Charlotte Hornets":"cha","Chicago Bulls":"chi","Cleveland Cavaliers":"cle","Dallas Mavericks":"dal","Denver Nuggets":"den","Detroit Pistons":"det","Golden State Warriors":"gs","Houston Rockets":"hou","Indiana Pacers":"ind","LA Clippers":"lac","Los Angeles Lakers":"lal","Memphis Grizzlies":"mem","Miami Heat":"mia","Milwaukee Bucks":"mil","Minnesota Timberwolves":"min","New Orleans Pelicans":"no","New York Knicks":"ny","Oklahoma City Thunder":"okc","Orlando Magic":"orl","Philadelphia 76ers":"phi","Phoenix Suns":"phx","Portland Trail Blazers":"por","Sacramento Kings":"sac","San Antonio Spurs":"sa","Toronto Raptors":"tor","Utah Jazz":"utah","Washington Wizards":"wsh"};
   const NHL_SLUG = {"Anaheim Ducks":"ana","Boston Bruins":"bos","Buffalo Sabres":"buf","Calgary Flames":"cgy","Carolina Hurricanes":"car","Chicago Blackhawks":"chi","Colorado Avalanche":"col","Columbus Blue Jackets":"cbj","Dallas Stars":"dal","Detroit Red Wings":"det","Edmonton Oilers":"edm","Florida Panthers":"fla","Los Angeles Kings":"la","Minnesota Wild":"min","Montreal Canadiens":"mtl","Nashville Predators":"nsh","New Jersey Devils":"nj","New York Islanders":"nyi","New York Rangers":"nyr","Ottawa Senators":"ott","Philadelphia Flyers":"phi","Pittsburgh Penguins":"pit","San Jose Sharks":"sj","Seattle Kraken":"sea","St. Louis Blues":"stl","Tampa Bay Lightning":"tb","Toronto Maple Leafs":"tor","Utah Mammoth":"utah","Vancouver Canucks":"van","Vegas Golden Knights":"vgk","Washington Capitals":"wsh","Winnipeg Jets":"wpg"};
+  // NBA.com franchise IDs for player stats API (stats.nba.com)
+  const NBA_COM_ID = {"Atlanta Hawks":1610612737,"Boston Celtics":1610612738,"Brooklyn Nets":1610612751,"Charlotte Hornets":1610612766,"Chicago Bulls":1610612741,"Cleveland Cavaliers":1610612739,"Dallas Mavericks":1610612742,"Denver Nuggets":1610612743,"Detroit Pistons":1610612765,"Golden State Warriors":1610612744,"Houston Rockets":1610612745,"Indiana Pacers":1610612754,"LA Clippers":1610612746,"Los Angeles Lakers":1610612747,"Memphis Grizzlies":1610612763,"Miami Heat":1610612748,"Milwaukee Bucks":1610612749,"Minnesota Timberwolves":1610612750,"New Orleans Pelicans":1610612740,"New York Knicks":1610612752,"Oklahoma City Thunder":1610612760,"Orlando Magic":1610612753,"Philadelphia 76ers":1610612755,"Phoenix Suns":1610612756,"Portland Trail Blazers":1610612757,"Sacramento Kings":1610612758,"San Antonio Spurs":1610612759,"Toronto Raptors":1610612761,"Utah Jazz":1610612762,"Washington Wizards":1610612764};
 
   const slug = sport === "nhl" ? NHL_SLUG[team] : NBA_SLUG[team];
   if (!slug) return res.status(400).json({ error: "Unknown team: " + team });
@@ -48,11 +50,15 @@ export default async function handler(req, res) {
     let teamGames = [];
     let injuryMap = {};
     let espnTeamStats = {};
+    let nbaStatsMap = {};
     try {
-      const [schedResp, injResp, statsResp] = await Promise.all([
+      const nbaComTeamId = sport === "nba" ? (NBA_COM_ID[team] || null) : null;
+      const nbaComUrl = nbaComTeamId ? `https://stats.nba.com/stats/leaguedashplayerstats?PerMode=PerGame&Season=2025-26&TeamID=${nbaComTeamId}&MeasureType=Base&PaceAdjust=N&PlusMinus=N&Rank=N&SeasonType=Regular%20Season` : null;
+      const [schedResp, injResp, statsResp, nbaComResp] = await Promise.all([
         fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/schedule`),
         fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/injuries`),
-        fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/statistics?season=${espnSeason}`)
+        fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/statistics?season=${espnSeason}`),
+        nbaComUrl ? fetch(nbaComUrl, { headers: {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Accept":"application/json, text/plain, */*","Accept-Language":"en-US,en;q=0.9","Referer":"https://www.nba.com/","x-nba-stats-origin":"stats","x-nba-stats-token":"true"} }) : Promise.resolve(null)
       ]);
       const schedJson = await schedResp.json();
       const completed = (schedJson?.events || []).filter(e => e.competitions?.[0]?.status?.type?.completed === true);
@@ -163,6 +169,32 @@ export default async function handler(req, res) {
           if (ppga != null && ppoa > 0) espnTeamStats.pk_pct = parseFloat(((1 - ppga/ppoa) * 100).toFixed(1));
         }
       } catch(_) {}
+
+      // NBA.com player stats - live per-game stats per player (PPG/RPG/APG)
+      if (nbaComResp) {
+        try {
+          const nbaComJson = await nbaComResp.json();
+          const rs = (nbaComJson.resultSets || []).find(r => r.name === "LeagueDashPlayerStats");
+          if (rs) {
+            const h = rs.headers;
+            const nameIdx = h.indexOf("PLAYER_NAME");
+            const ptsIdx  = h.indexOf("PTS");
+            const rebIdx  = h.indexOf("REB");
+            const astIdx  = h.indexOf("AST");
+            const normKey = s => (s||"").toLowerCase().replace(/[^a-z]/g,"");
+            for (const row of (rs.rowSet || [])) {
+              const pName = row[nameIdx];
+              if (pName) {
+                nbaStatsMap[normKey(pName)] = {
+                  ppg: row[ptsIdx] != null ? parseFloat(row[ptsIdx]) : null,
+                  rpg: row[rebIdx] != null ? parseFloat(row[rebIdx]) : null,
+                  apg: row[astIdx] != null ? parseFloat(row[astIdx]) : null,
+                };
+              }
+            }
+          }
+        } catch(_) {}
+      }
     } catch(_) {}
 
     // Step 3: Extract players from ESPN roster API
@@ -181,8 +213,17 @@ export default async function handler(req, res) {
     }
 
     // Get player names, positions, and any stats ESPN returns directly
+    const normKey = s => (s||"").toLowerCase().replace(/[^a-z]/g,"");
     const playerNames = allPlayers.map(p => {
-      // Handle multiple ESPN response formats for stats:
+      const fullName = p.fullName || p.displayName || "Unknown";
+      // For NBA, prefer NBA.com live stats (accurate) over ESPN's unreliable stats field
+      if (sport === "nba" && Object.keys(nbaStatsMap).length > 0) {
+        const nb = nbaStatsMap[normKey(fullName)];
+        if (nb) {
+          return { name: fullName, position: p.position?.abbreviation || "F", jersey: p.jersey || "", ppg: nb.ppg, rpg: nb.rpg, apg: nb.apg };
+        }
+      }
+      // Fallback: try ESPN stat formats
       // Format A (newer): statistics.splits.categories[].stats
       // Format B (older): statistics.splits[].stats  (array)
       // Format C: statistics.categories[].stats
@@ -199,7 +240,7 @@ export default async function handler(req, res) {
       const rpg = espnStat("avgRebounds") ?? espnStat("reb") ?? espnStat("REB") ?? espnStat("RPG");
       const apg = espnStat("avgAssists") ?? espnStat("ast") ?? espnStat("AST") ?? espnStat("APG");
       return {
-        name: p.fullName || p.displayName || "Unknown",
+        name: fullName,
         position: p.position?.abbreviation || "F",
         jersey: p.jersey || "",
         ppg: ppg > 0 ? ppg : null,
@@ -228,7 +269,7 @@ export default async function handler(req, res) {
           }]
         })
       }),
-      sport === "nhl" ? Promise.resolve(null) : fetch("https://api.anthropic.com/v1/messages", {
+      (sport === "nhl" || Object.keys(nbaStatsMap).length >= 8) ? Promise.resolve(null) : fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({

@@ -49,10 +49,13 @@ function RosterPanel({teamName,abbr,teamData,onCycle,sport,accent,loading}){
   if(sport==="nhl") subtitle=teamData.wins+"W-"+teamData.losses+"L-"+teamData.otl+"OTL - "+teamData.gf_pg+" GF/G - "+teamData.ga_pg+" GA/G";
   else if(sport==="ncaam") subtitle=teamData.wins+"W-"+teamData.losses+"L - "+teamData.ppg+" PPG - "+teamData.opp+" OPP"+(teamData.ranking>0?" - #"+teamData.ranking+" AP":"")+" - "+teamData.conference;
   else subtitle=teamData.wins+"W-"+teamData.losses+"L - "+teamData.ppg+" PPG - "+teamData.opp+" OPP";
+  const restDays=teamData.rest??null;
+  const restLabel=restDays===0?"B2B":restDays===1?"1d rest":restDays!=null?restDays+"d rest":null;
+  const restColor=restDays===0?"#f87171":restDays===1?C.copper:C.teal;
   return <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,overflow:"hidden"}}>
     <div style={{padding:"10px 14px",background:C.dark,borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:10}}>
       <Badge abbr={abbr} size={36} accent={ac}/>
-      <div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:15,color:C.white}}>{teamName}</div><div style={{fontSize:11,color:C.muted}}>{subtitle}</div></div>
+      <div style={{flex:1}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:15,color:C.white,display:"flex",alignItems:"center",gap:8}}>{teamName}{restLabel&&<span style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:4,background:restColor+"22",color:restColor,letterSpacing:.8,border:"1px solid "+restColor+"44"}}>{restLabel}</span>}</div><div style={{fontSize:11,color:C.muted}}>{subtitle}</div></div>
     </div>
     {sport==="nhl"&&teamData.goalie&&<div style={{padding:"8px 14px",background:"#0f0f14",borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:10}}>
       <div style={{fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:800,color:C.ice,width:20,textAlign:"center"}}>G</div>
@@ -115,30 +118,27 @@ function injPen(roster,sw=0.09,kw=0.045,rw=0.012){return(roster||[]).reduce((s,p
 // Calibration target: range should be roughly 43-66% for most matchups
 
 function nbaMdlPythagorean(h,a){
-  // Season Pythagorean (exp 13.91 = empirically optimal for NBA)
-  // Uses point differential, ignores W/L noise
-  const hP=pythagorean(h.ppg,h.opp,13.91);
-  const aP=pythagorean(a.ppg,a.opp,13.91);
-  // L10 Pythagorean for recency  -  recent form is meaningful but noisy
+  // Use home/away splits when available — more accurate than combined stats
+  const hPPG=h.home_ppg||h.ppg, hOPP=h.home_opp||h.opp;
+  const aPPG=a.away_ppg||a.ppg, aOPP=a.away_opp||a.opp;
+  const hP=pythagorean(hPPG,hOPP,13.91);
+  const aP=pythagorean(aPPG,aOPP,13.91);
   const hR=pythagorean(h.last10_ppg||h.ppg, h.last10_opp||h.opp, 13.91);
   const aR=pythagorean(a.last10_ppg||a.ppg, a.last10_opp||a.opp, 13.91);
-  // Blend: 65% season quality, 35% recent form
   const hQ=hP*0.65+hR*0.35;
   const aQ=aP*0.65+aR*0.35;
-  // HCA applied as a fixed pythagorean bump: home team modeled as if scoring 3.2 more
-  const hHCA=pythagorean(h.ppg+3.2,h.opp,13.91);
+  const hHCA=pythagorean(hPPG+3.2,hOPP,13.91);
   const hAdj=hQ*0.65+hHCA*0.35;
-  // Injury reduction applied to quality directly
   const hi=injPen(h.roster,0.09,0.04,0.01);
   const ai=injPen(a.roster,0.09,0.04,0.01);
   const p=log5(Math.max(0.03,hAdj-hi),Math.max(0.03,aQ-ai));
-  return{homeProb:p,hQ:(hQ*100).toFixed(1),aQ:(aQ*100).toFixed(1),detail:`H Pyth ${(hQ*100).toFixed(1)}%  A Pyth ${(aQ*100).toFixed(1)}%  +3.2pt HCA`};}
+  const note=h.home_ppg&&a.away_ppg?" (splits)":"";
+  return{homeProb:p,hQ:(hQ*100).toFixed(1),aQ:(aQ*100).toFixed(1),detail:`H Pyth ${(hQ*100).toFixed(1)}%  A Pyth ${(aQ*100).toFixed(1)}%  +3.2pt HCA${note}`};}
 
 function nbaMdlNetRating(h,a){
-  // Net rating blend: season NET is the single best predictor
-  // +1 pt net rating ~ +2.7% win probability (empirical NBA)
-  const hNet=h.ppg-h.opp;
-  const aNet=a.ppg-a.opp;
+  // Use home/away splits when available
+  const hNet=(h.home_ppg||h.ppg)-(h.home_opp||h.opp);
+  const aNet=(a.away_ppg||a.ppg)-(a.away_opp||a.opp);
   const hRecNet=(h.last10_ppg||h.ppg)-(h.last10_opp||h.opp);
   const aRecNet=(a.last10_ppg||a.ppg)-(a.last10_opp||a.opp);
   // Weight recent more than season  -  injuries/trades make recent more real
@@ -199,16 +199,18 @@ function nbaMdlMonteCarlo(h,a,N=10000){
   const aOff=(a.ppg*0.60+(a.last10_ppg||a.ppg)*0.40)*(1-ai);
   const hDef=(a.opp*0.60+(a.last10_opp||a.opp)*0.40)*(1-ai*0.4);
   const aDef=(h.opp*0.60+(h.last10_opp||h.opp)*0.40)*(1-hi*0.4);
-  // Projected scores blend own offense vs opponent defense
-  const hExp=(hOff*0.55+hDef*0.45)+1.6; // +1.6 HCA in pts; blend own offense vs opp defense (both in pts units)
-  const aExp=aOff*0.55+aDef*0.45;
+  // Rest penalty: back-to-back (0 days) = -3pts, 1 day = -1.5pts, 2+ days = 0
+  const restPen=d=>Math.max(0,(2-Math.min(d??2,2))*1.5);
+  const hExp=(hOff*0.55+hDef*0.45)+1.6-restPen(h.rest);
+  const aExp=(aOff*0.55+aDef*0.45)-restPen(a.rest);
   const sig=11.5; // NBA single-game std dev ~11-12 pts
   let w=0;
   for(let i=0;i<N;i++){
     const z1=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
     const z2=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
     if(hExp+z1*sig>aExp+z2*sig)w++;}
-  return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts`};}
+  const restNote=(h.rest??2)<2||(a.rest??2)<2?`  Rest: H ${h.rest??2}d A ${a.rest??2}d`:"";
+  return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts${restNote}`};}
 
 function nbaConsensus(ps,mkt){
   // NetRating gets most weight  -  it's the best single NBA predictor
@@ -289,16 +291,16 @@ const NHL_TEAMS=["Anaheim Ducks","Boston Bruins","Buffalo Sabres","Calgary Flame
 const NHL_ABBR={"Anaheim Ducks":"ANA","Boston Bruins":"BOS","Buffalo Sabres":"BUF","Calgary Flames":"CGY","Carolina Hurricanes":"CAR","Chicago Blackhawks":"CHI","Colorado Avalanche":"COL","Columbus Blue Jackets":"CBJ","Dallas Stars":"DAL","Detroit Red Wings":"DET","Edmonton Oilers":"EDM","Florida Panthers":"FLA","Los Angeles Kings":"LAK","Minnesota Wild":"MIN","Montreal Canadiens":"MTL","Nashville Predators":"NSH","New Jersey Devils":"NJD","New York Islanders":"NYI","New York Rangers":"NYR","Ottawa Senators":"OTT","Philadelphia Flyers":"PHI","Pittsburgh Penguins":"PIT","San Jose Sharks":"SJS","Seattle Kraken":"SEA","St. Louis Blues":"STL","Tampa Bay Lightning":"TBL","Toronto Maple Leafs":"TOR","Utah Mammoth":"UTA","Vancouver Canucks":"VAN","Vegas Golden Knights":"VGK","Washington Capitals":"WSH","Winnipeg Jets":"WPG"};
 
 function nhlMdlGoalDiff(h,a){
-  // Goals per game differential  -  the primary NHL quality signal
-  // Pythagorean exp=2.0 works well for hockey
-  const hP=pythagorean(h.gf_pg,h.ga_pg,2.0);
-  const aP=pythagorean(a.gf_pg,a.ga_pg,2.0);
+  // Use home/away splits when available
+  const hGF=h.home_gf||h.gf_pg, hGA=h.home_ga||h.ga_pg;
+  const aGF=a.away_gf||a.gf_pg, aGA=a.away_ga||a.ga_pg;
+  const hP=pythagorean(hGF,hGA,2.0);
+  const aP=pythagorean(aGF,aGA,2.0);
   const hR=pythagorean(h.last10_gf||h.gf_pg,h.last10_ga||h.ga_pg,2.0);
   const aR=pythagorean(a.last10_gf||a.gf_pg,a.last10_ga||a.ga_pg,2.0);
   const hQ=hP*0.60+hR*0.40;
   const aQ=aP*0.60+aR*0.40;
-  // HCA: +0.10 goals -> ~pythagorean bump
-  const hHCA=pythagorean(h.gf_pg+0.10,h.ga_pg,2.0);
+  const hHCA=pythagorean(hGF+0.10,hGA,2.0);
   const hAdj=hQ*0.65+hHCA*0.35;
   const hi=injPen(h.roster,0.07,0.035,0.008);
   const ai=injPen(a.roster,0.07,0.035,0.008);
@@ -356,8 +358,10 @@ function nhlMdlMonteCarlo(h,a,N=10000){
   const aGA=(h.ga_pg*0.60+(h.last10_ga||h.ga_pg)*0.40)*(1-aGI*0.5);
   const aGF=(a.gf_pg*0.60+(a.last10_gf||a.gf_pg)*0.40)*(1-ai);
   const hGA=(a.ga_pg*0.60+(a.last10_ga||a.ga_pg)*0.40)*(1-hGI*0.5);
-  const hL=Math.max(0.6,(hGF+(3.0-hGA))/2+0.05);
-  const aL=Math.max(0.6,(aGF+(3.0-aGA))/2);
+  // Rest penalty: back-to-back costs ~0.3 goals (NHL is lower-scoring than NBA)
+  const restPenG=d=>Math.max(0,(2-Math.min(d??2,2))*0.15);
+  const hL=Math.max(0.6,(hGF+(3.0-hGA))/2+0.05-restPenG(h.rest));
+  const aL=Math.max(0.6,(aGF+(3.0-aGA))/2-restPenG(a.rest));
   function rpois(lam){let k=0,p=1,L=Math.exp(-lam);while(p>L){k++;p*=Math.random();}return k-1;}
   let hw=0,tie=0;
   for(let i=0;i<N;i++){const hg=rpois(hL),ag=rpois(aL);if(hg>ag)hw++;else if(hg===ag)tie++;}
@@ -581,9 +585,10 @@ function ncaamMdlMonteCarlo(h,a,N=10000){
   const aOff=(a.ppg/Math.max(a.tempo,55))*gamePace*(1-ai);
   const hDef=(a.opp/Math.max(a.tempo,55))*gamePace;
   const aDef=(h.opp/Math.max(h.tempo,55))*gamePace;
-  // Score = blend own offense vs opponent defense (both in pts units after tempo adjustment)
-  const hExp=(hOff*0.55+hDef*0.45)+1.8;
-  const aExp=aOff*0.55+aDef*0.45;
+  // Rest penalty: back-to-back costs ~2.5pts in college basketball
+  const restPenN=d=>Math.max(0,(2-Math.min(d??2,2))*1.25);
+  const hExp=(hOff*0.55+hDef*0.45)+1.8-restPenN(h.rest);
+  const aExp=(aOff*0.55+aDef*0.45)-restPenN(a.rest);
   const sig=10; // NCAAM game SD ~10 pts per team
   let w=0;
   for(let i=0;i<N;i++){

@@ -18,6 +18,19 @@ export default async function handler(req, res) {
     const wins = parseInt(parts[0]) || 15;
     const losses = parseInt(parts[1]) || 15;
 
+    // Fetch schedule for rest days
+    const teamNumId = String(teamJson?.team?.id || teamId || "");
+    let daysSinceLastGame = 2;
+    try {
+      const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}/schedule`);
+      const schedJson = await schedResp.json();
+      const completed = (schedJson?.events || []).filter(e => e.competitions?.[0]?.status?.type?.completed === true);
+      if (completed.length > 0) {
+        const lastDate = new Date(completed[completed.length - 1].date);
+        daysSinceLastGame = Math.max(0, Math.floor((new Date() - lastDate) / (1000 * 60 * 60 * 24)));
+      }
+    } catch(_) {}
+
     const athletes = rosterJson?.athletes || [];
     let allPlayers = [];
     if (Array.isArray(athletes) && athletes.length > 0) {
@@ -83,6 +96,7 @@ export default async function handler(req, res) {
     parsed.conference = parsed.conference || "Unknown";
     parsed.ranking = parsed.ranking || 0;
     parsed.kenpom_rank = parsed.kenpom_rank || 150;
+    parsed.rest = daysSinceLastGame;
     parsed.roster = (parsed.roster || []).map(p => ({
       name: p.name || "Unknown",
       ppg: p.ppg || 5,

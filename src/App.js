@@ -46,7 +46,7 @@ const STATUS_CYCLE=["PLAYING","QUESTIONABLE","DOUBTFUL","OUT"];
 function Badge({abbr,size=44,accent}){return <div style={{width:size,height:size,borderRadius:8,background:"linear-gradient(135deg,#3A3A4A,#16161C)",border:"1.5px solid "+(accent||C.copper),display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:size*.28,color:accent||C.copper,letterSpacing:.5,flexShrink:0}}>{abbr}</div>;}
 function Pill({label,color}){return <span style={{padding:"2px 8px",borderRadius:12,background:color+"18",border:"1px solid "+color,color,fontSize:10,fontWeight:700,fontFamily:"'Barlow Condensed'"}}>{label}</span>;}
 function OddsPill({prob,accent}){const ac=accent||C.teal,fav=prob>=.5;return <div style={{padding:"10px 18px",borderRadius:8,textAlign:"center",background:fav?ac+"18":C.black,border:"1.5px solid "+(fav?ac:C.border),minWidth:80}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:fav?ac:C.white}}>{probToAmerican(prob)}</div><div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginTop:1}}>Fair odds</div></div>;}
-function SectionHeader({label,accent,right}){return <div style={{padding:"10px 16px",background:"linear-gradient(90deg,"+(accent||C.copper)+"22,transparent)",borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:8}}><div style={{width:3,height:16,borderRadius:2,background:accent||C.copper}}/><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1.5,color:C.white,textTransform:"uppercase"}}>{label}</span>{right&&<div style={{marginLeft:"auto"}}>{right}</div>}</div>;}
+function SectionHeader({label,accent,right}){return <div style={{padding:"10px 16px",background:"linear-gradient(90deg,"+(accent||C.copper)+"22,transparent)",borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:8,borderRadius:"10px 10px 0 0"}}><div style={{width:3,height:16,borderRadius:2,background:accent||C.copper}}/><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1.5,color:C.white,textTransform:"uppercase"}}>{label}</span>{right&&<div style={{marginLeft:"auto"}}>{right}</div>}</div>;}
 function WinBar({awayProb,awayAbbr,homeAbbr,accent}){const ac=accent||C.teal;return <div style={{marginTop:8}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:awayProb>.5?ac:C.muted}}>{awayAbbr} {(awayProb*100).toFixed(1)}%</span><span style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:700,color:(1-awayProb)>.5?ac:C.muted}}>{(100-awayProb*100).toFixed(1)}% {homeAbbr}</span></div><div style={{height:6,borderRadius:3,background:C.border,overflow:"hidden"}}><div style={{height:"100%",width:(awayProb*100)+"%",background:"linear-gradient(90deg,"+ac+"99,"+ac+")",borderRadius:3,transition:"width .6s ease"}}/></div></div>;}
 
 function TeamSelect({items,getLabel,getSub,getId,displayValue,onSelect,accent,disabled,placeholder}){
@@ -278,7 +278,7 @@ function NBAPage(){
   const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
   const bothLoaded=awayData&&homeData;const awayAbbr=NBA_ABBR[awayTeam]||"AWY";const homeAbbr=NBA_ABBR[homeTeam]||"HME";
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
-    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12}}>
       <SectionHeader label="Step 1 - Select Away Team" accent={C.teal} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.teal}/>}/>
       <div style={{padding:14}}>
         <TeamSelect items={NBA_TEAMS} getLabel={t=>t} displayValue={awayTeam} accent={C.teal} placeholder="Search NBA team..." disabled={awayLoading} onSelect={t=>{setAwayTeam(t);setAwayData(null);setResults(null);fetchTeam(t,"away");}}/>
@@ -287,7 +287,7 @@ function NBAPage(){
       </div>
       {(awayLoading||awayData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={awayTeam} abbr={awayAbbr} teamData={awayData} onCycle={n=>cyclePlayer("away",n)} sport="nba" accent={C.teal} loading={awayLoading}/></div>}
     </div>
-    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12}}>
       <SectionHeader label="Step 2 - Select Home Team" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
       <div style={{padding:14}}>
         <TeamSelect items={NBA_TEAMS} getLabel={t=>t} displayValue={homeTeam} accent={C.copper} placeholder="Search NBA team..." disabled={homeLoading} onSelect={t=>{setHomeTeam(t);setHomeData(null);setResults(null);fetchTeam(t,"home");}}/>
@@ -474,7 +474,7 @@ function NHLPage(){
   const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
   const bothLoaded=awayData&&homeData;const awayAbbr=NHL_ABBR[awayTeam]||"AWY";const homeAbbr=NHL_ABBR[homeTeam]||"HME";
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
-    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12}}>
       <SectionHeader label="Step 1 - Select Away Team" accent={C.ice} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.ice}/>}/>
       <div style={{padding:14}}>
         <TeamSelect items={NHL_TEAMS} getLabel={t=>t} displayValue={awayTeam} accent={C.ice} placeholder="Search NHL team..." disabled={awayLoading} onSelect={t=>{setAwayTeam(t);setAwayData(null);setResults(null);fetchTeam(t,"away");}}/>
@@ -483,7 +483,7 @@ function NHLPage(){
       </div>
       {(awayLoading||awayData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={awayTeam} abbr={awayAbbr} teamData={awayData} onCycle={n=>cyclePlayer("away",n)} sport="nhl" accent={C.ice} loading={awayLoading}/></div>}
     </div>
-    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12}}>
       <SectionHeader label="Step 2 - Select Home Team" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
       <div style={{padding:14}}>
         <TeamSelect items={NHL_TEAMS} getLabel={t=>t} displayValue={homeTeam} accent={C.copper} placeholder="Search NHL team..." disabled={homeLoading} onSelect={t=>{setHomeTeam(t);setHomeData(null);setResults(null);fetchTeam(t,"home");}}/>
@@ -802,7 +802,7 @@ function NCAAMPage(){
 
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
     {/* Away */}
-    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12}}>
       <SectionHeader label="Step 1 - Select Away Team" accent={C.amber} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.amber}/>}/>
       <div style={{padding:14}}>
         <TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={awayTeam?.name||""} accent={C.amber} placeholder="Search team or conference..." disabled={awayLoading} onSelect={t=>{setAwayTeam(t);setAwayData(null);setResults(null);fetchTeam(t,"away");}}/>
@@ -813,7 +813,7 @@ function NCAAMPage(){
     </div>
 
     {/* Home */}
-    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12}}>
       <SectionHeader label="Step 2 - Select Home Team" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
       <div style={{padding:14}}>
         <TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={homeTeam?.name||""} accent={C.copper} placeholder="Search team or conference..." disabled={homeLoading} onSelect={t=>{setHomeTeam(t);setHomeData(null);setResults(null);fetchTeam(t,"home");}}/>

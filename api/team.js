@@ -58,7 +58,7 @@ export default async function handler(req, res) {
         fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/schedule`),
         fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/injuries`),
         fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/statistics?season=${espnSeason}`),
-        nbaComUrl ? fetch(nbaComUrl, { headers: {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Accept":"application/json, text/plain, */*","Accept-Language":"en-US,en;q=0.9","Referer":"https://www.nba.com/","x-nba-stats-origin":"stats","x-nba-stats-token":"true"} }) : Promise.resolve(null)
+        nbaComUrl ? fetch(nbaComUrl, { headers: {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36","Accept":"application/json, text/plain, */*","Accept-Language":"en-US,en;q=0.9","Referer":"https://www.nba.com/","x-nba-stats-origin":"stats","x-nba-stats-token":"true"} }).catch(() => null) : Promise.resolve(null)
       ]);
       const schedJson = await schedResp.json();
       const completed = (schedJson?.events || []).filter(e => e.competitions?.[0]?.status?.type?.completed === true);

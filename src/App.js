@@ -97,7 +97,7 @@ function ModelCard({icon,name,desc,awayTeam,homeTeam,awayAbbr,homeAbbr,awayProb,
 const NBA_TEAMS=["Atlanta Hawks","Boston Celtics","Brooklyn Nets","Charlotte Hornets","Chicago Bulls","Cleveland Cavaliers","Dallas Mavericks","Denver Nuggets","Detroit Pistons","Golden State Warriors","Houston Rockets","Indiana Pacers","LA Clippers","Los Angeles Lakers","Memphis Grizzlies","Miami Heat","Milwaukee Bucks","Minnesota Timberwolves","New Orleans Pelicans","New York Knicks","Oklahoma City Thunder","Orlando Magic","Philadelphia 76ers","Phoenix Suns","Portland Trail Blazers","Sacramento Kings","San Antonio Spurs","Toronto Raptors","Utah Jazz","Washington Wizards"];
 const NBA_ABBR={"Atlanta Hawks":"ATL","Boston Celtics":"BOS","Brooklyn Nets":"BKN","Charlotte Hornets":"CHA","Chicago Bulls":"CHI","Cleveland Cavaliers":"CLE","Dallas Mavericks":"DAL","Denver Nuggets":"DEN","Detroit Pistons":"DET","Golden State Warriors":"GSW","Houston Rockets":"HOU","Indiana Pacers":"IND","LA Clippers":"LAC","Los Angeles Lakers":"LAL","Memphis Grizzlies":"MEM","Miami Heat":"MIA","Milwaukee Bucks":"MIL","Minnesota Timberwolves":"MIN","New Orleans Pelicans":"NOP","New York Knicks":"NYK","Oklahoma City Thunder":"OKC","Orlando Magic":"ORL","Philadelphia 76ers":"PHI","Phoenix Suns":"PHX","Portland Trail Blazers":"POR","Sacramento Kings":"SAC","San Antonio Spurs":"SAS","Toronto Raptors":"TOR","Utah Jazz":"UTA","Washington Wizards":"WAS"};
 
-// IMPROVED MODELS v2 â€” Restructured for accuracy
+// IMPROVED MODELS v2  -  Restructured for accuracy
 // Key changes:
 // - HCA applied ONCE, correctly calibrated per sport
 // - Models use genuinely different data slices (season/recent/roster/efficiency)
@@ -111,14 +111,14 @@ function injPen(roster,sw=0.09,kw=0.045,rw=0.012){return(roster||[]).reduce((s,p
 
 // â”€â”€ NBA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // True NBA HCA: ~3.2 pts, home wins ~59% of games historically
-// Calibration target: range should be roughly 43â€“66% for most matchups
+// Calibration target: range should be roughly 43-66% for most matchups
 
 function nbaMdlPythagorean(h,a){
   // Season Pythagorean (exp 13.91 = empirically optimal for NBA)
   // Uses point differential, ignores W/L noise
   const hP=pythagorean(h.ppg,h.opp,13.91);
   const aP=pythagorean(a.ppg,a.opp,13.91);
-  // L10 Pythagorean for recency â€” recent form is meaningful but noisy
+  // L10 Pythagorean for recency  -  recent form is meaningful but noisy
   const hR=pythagorean(h.last10_ppg||h.ppg, h.last10_opp||h.opp, 13.91);
   const aR=pythagorean(a.last10_ppg||a.ppg, a.last10_opp||a.opp, 13.91);
   // Blend: 65% season quality, 35% recent form
@@ -135,17 +135,17 @@ function nbaMdlPythagorean(h,a){
 
 function nbaMdlNetRating(h,a){
   // Net rating blend: season NET is the single best predictor
-  // +1 pt net rating â‰ˆ +2.7% win probability (empirical NBA)
+  // +1 pt net rating ~ +2.7% win probability (empirical NBA)
   const hNet=h.ppg-h.opp;
   const aNet=a.ppg-a.opp;
   const hRecNet=(h.last10_ppg||h.ppg)-(h.last10_opp||h.opp);
   const aRecNet=(a.last10_ppg||a.ppg)-(a.last10_opp||a.opp);
-  // Weight recent more than season â€” injuries/trades make recent more real
+  // Weight recent more than season  -  injuries/trades make recent more real
   const hBlend=hNet*0.55+hRecNet*0.45;
   const aBlend=aNet*0.55+aRecNet*0.45;
   const hi=injPen(h.roster,0.10,0.05,0.01);
   const ai=injPen(a.roster,0.10,0.05,0.01);
-  // 3.2pt HCA, injury adjustment as pts (star out â‰ˆ -2.5 effective pts)
+  // 3.2pt HCA, injury adjustment as pts (star out ~ -2.5 effective pts)
   const adjDiff=(hBlend-aBlend)+3.2-(hi-ai)*18;
   // Scale: 1pt = 0.027, logit calibrated to NBA range
   const p=logistic(adjDiff*0.11);
@@ -153,7 +153,7 @@ function nbaMdlNetRating(h,a){
 
 function nbaMdlFourFactors(h,a){
   // Four Factors: eFG% 40%, TOV% 25%, OREB% 20%, FTR 15%
-  // INDEPENDENT from PPG/opp signal â€” uses efficiency ratios
+  // INDEPENDENT from PPG/opp signal  -  uses efficiency ratios
   // NBA average: eFG ~52%, TOV ~13%, OREB ~25%, FTR ~23%
   const ff=d=>{
     const efg=(d.efg_pct||0.52)*0.40;
@@ -173,11 +173,11 @@ function nbaMdlFourFactors(h,a){
 
 function nbaMdlStarPower(h,a){
   // Star power model: top 3 players drive outcomes (different signal from team averages)
-  // Sorted by PER â€” if star is OUT that cascades hard
+  // Sorted by PER  -  if star is OUT that cascades hard
   const sortH=[...(h.roster||[])].sort((x,y)=>(y.per||0)-(x.per||0));
   const sortA=[...(a.roster||[])].sort((x,y)=>(y.per||0)-(x.per||0));
   const score=roster=>{
-    // NBA: player value is front-loaded. #1 star â‰ˆ 35% of team value
+    // NBA: player value is front-loaded. #1 star ~ 35% of team value
     const w=[0.35,0.25,0.17,0.23/Math.max(roster.length-3,1)];
     return roster.reduce((s,p,i)=>{
       const wi=i<3?w[i]:w[3];
@@ -190,7 +190,7 @@ function nbaMdlStarPower(h,a){
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hVal:hV.toFixed(1),aVal:aV.toFixed(1),detail:`H star PER: ${hV.toFixed(1)}  A star PER: ${aV.toFixed(1)}`};}
 
 function nbaMdlMonteCarlo(h,a,N=10000){
-  // Point-spread simulation â€” different methodology from all above
+  // Point-spread simulation  -  different methodology from all above
   // Uses offensive + defensive ratings to project actual scores
   const hi=injPen(h.roster,0.11,0.055,0.01);
   const ai=injPen(a.roster,0.11,0.055,0.01);
@@ -210,8 +210,8 @@ function nbaMdlMonteCarlo(h,a,N=10000){
   return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts`};}
 
 function nbaConsensus(ps){
-  // NetRating gets most weight â€” it's the best single NBA predictor
-  // Pythagorean next â€” independent from raw net rating
+  // NetRating gets most weight  -  it's the best single NBA predictor
+  // Pythagorean next  -  independent from raw net rating
   // FF, StarPower, MC provide orthogonal checks
   return Math.min(0.97,Math.max(0.03,[0.20,0.28,0.18,0.16,0.18].reduce((s,w,i)=>s+ps[i]*w,0)));}
 
@@ -259,12 +259,12 @@ function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
         </div>
         <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr}/>
         {(aE||hE)&&<div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>{aE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(aE)>=2?C.teal+"18":C.black,border:"1px solid "+(parseFloat(aE)>=2?C.teal:C.border),fontSize:11,color:parseFloat(aE)>=2?C.teal:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{awayAbbr} Edge: {parseFloat(aE)>=0?"+":""}{aE}%{aEV?" - EV "+(parseFloat(aEV)>=0?"+":"")+aEV+"/$1":""}</div>}{hE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(hE)>=2?C.teal+"18":C.black,border:"1px solid "+(parseFloat(hE)>=2?C.teal:C.border),fontSize:11,color:parseFloat(hE)>=2?C.teal:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{homeAbbr} Edge: {parseFloat(hE)>=0?"+":""}{hE}%{hEV?" - EV "+(parseFloat(hEV)>=0?"+":"")+hEV+"/$1":""}</div>}</div>}
-        {(hI&&aI)&&(()=>{const mktH=hI/(hI+aI);const mktA=aI/(hI+aI);const ourH=cH;const diff=Math.abs(ourH-mktH);const big=diff>=0.10;return big?<div style={{marginTop:10,padding:"10px 14px",background:"#1a120a",border:"1px solid "+C.amber+"66",borderRadius:8,display:"flex",gap:8,alignItems:"flex-start"}}><div style={{fontSize:14,flexShrink:0}}>âš ï¸</div><div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.amber,letterSpacing:1}}>MODEL/MARKET DIVERGENCE</div><div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.6}}>Market implies {(mktH*100).toFixed(0)}% {homeAbbr} / {(mktA*100).toFixed(0)}% {awayAbbr}. Our model says {(cH*100).toFixed(0)}% / {(aw*100).toFixed(0)}%. Gap of {(diff*100).toFixed(0)}%. Large divergences usually mean the market knows something â€” injuries, line movement, or our stats may be stale. Bet smaller or verify.</div></div></div>:null;})()}
+        {(hI&&aI)&&(()=>{const mktH=hI/(hI+aI);const mktA=aI/(hI+aI);const ourH=cH;const diff=Math.abs(ourH-mktH);const big=diff>=0.10;return big?<div style={{marginTop:10,padding:"10px 14px",background:"#1a120a",border:"1px solid "+C.amber+"66",borderRadius:8,display:"flex",gap:8,alignItems:"flex-start"}}><div style={{fontSize:14,flexShrink:0}}>[!]</div><div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.amber,letterSpacing:1}}>MODEL/MARKET DIVERGENCE</div><div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.6}}>Market implies {(mktH*100).toFixed(0)}% {homeAbbr} / {(mktA*100).toFixed(0)}% {awayAbbr}. Our model says {(cH*100).toFixed(0)}% / {(aw*100).toFixed(0)}%. Gap of {(diff*100).toFixed(0)}%. Large divergences usually mean the market knows something  -  injuries, line movement, or our stats may be stale. Bet smaller or verify.</div></div></div>:null;})()}
         <button className="hov-btn" onClick={onRecalc} style={{marginTop:12,width:"100%",padding:"9px 0",background:"transparent",border:"1px solid "+C.border,borderRadius:7,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.muted,textTransform:"uppercase"}}>Recalculate with Updated Injuries</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
         <ModelCard icon="PYT" name="Pythagorean" desc="Point diff Pythagorean (exp 13.9) + L10 blend" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-pyth.homeProb} detail={pyth.detail}/>
-        <ModelCard icon="NET" name="Net Rating" desc="PPG minus OPP â€” best single NBA predictor" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-net.homeProb} detail={net.detail}/>
+        <ModelCard icon="NET" name="Net Rating" desc="PPG minus OPP  -  best single NBA predictor" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-net.homeProb} detail={net.detail}/>
         <ModelCard icon="4F" name="Four Factors" desc="eFG%, TOV%, OREB%, FTR efficiency ratios" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={ff.detail}/>
         <ModelCard icon="STR" name="Star Power" desc="Top-3 player PER weighted by availability" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-star.homeProb} detail={star.detail}/>
       </div>
@@ -276,7 +276,7 @@ function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
         </div>
       </div>
     </>}
-    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["PYT","Pythagorean (20%)","Season + L10 Pythagorean win% (exp 13.9). Regresses luck out of raw W/L. HCA via +3.2pt scoring model."],["NET","Net Rating (28%)","55% season + 45% recent PPG-OPP differential. Best single NBA predictor. 1pt â‰ˆ +2.7% win probability."],["4F","Four Factors (18%)","eFG%(40%) + TOV%(25%) + OREB%(20%) + FTR(15%). Entirely independent efficiency signal."],["STR","Star Power (16%)","Top-3 PER weighted by injury status: OUT=0%, DOUBTFUL=20%, Q=62%. Top player worth 35% of team score."],["MC","Monte Carlo (18%)","10,000 simulations blending offense vs opponent defense. Normal distribution Ïƒ=11.5pts."],["W","Consensus","Pythagorean 20% + Net Rating 28% + Four Factors 18% + Star Power 16% + Monte Carlo 18%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.copper+"22",border:"1px solid "+C.copper+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.copper,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.copper,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
+    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["PYT","Pythagorean (20%)","Season + L10 Pythagorean win% (exp 13.9). Regresses luck out of raw W/L. HCA via +3.2pt scoring model."],["NET","Net Rating (28%)","55% season + 45% recent PPG-OPP differential. Best single NBA predictor. 1pt ~ +2.7% win probability."],["4F","Four Factors (18%)","eFG%(40%) + TOV%(25%) + OREB%(20%) + FTR(15%). Entirely independent efficiency signal."],["STR","Star Power (16%)","Top-3 PER weighted by injury status: OUT=0%, DOUBTFUL=20%, Q=62%. Top player worth 35% of team score."],["MC","Monte Carlo (18%)","10,000 simulations blending offense vs opponent defense. Normal distribution sigma=11.5pts."],["W","Consensus","Pythagorean 20% + Net Rating 28% + Four Factors 18% + Star Power 16% + Monte Carlo 18%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.copper+"22",border:"1px solid "+C.copper+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.copper,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.copper,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
   </div>;
 }
 
@@ -285,7 +285,7 @@ const NHL_TEAMS=["Anaheim Ducks","Boston Bruins","Buffalo Sabres","Calgary Flame
 const NHL_ABBR={"Anaheim Ducks":"ANA","Boston Bruins":"BOS","Buffalo Sabres":"BUF","Calgary Flames":"CGY","Carolina Hurricanes":"CAR","Chicago Blackhawks":"CHI","Colorado Avalanche":"COL","Columbus Blue Jackets":"CBJ","Dallas Stars":"DAL","Detroit Red Wings":"DET","Edmonton Oilers":"EDM","Florida Panthers":"FLA","Los Angeles Kings":"LAK","Minnesota Wild":"MIN","Montreal Canadiens":"MTL","Nashville Predators":"NSH","New Jersey Devils":"NJD","New York Islanders":"NYI","New York Rangers":"NYR","Ottawa Senators":"OTT","Philadelphia Flyers":"PHI","Pittsburgh Penguins":"PIT","San Jose Sharks":"SJS","Seattle Kraken":"SEA","St. Louis Blues":"STL","Tampa Bay Lightning":"TBL","Toronto Maple Leafs":"TOR","Utah Mammoth":"UTA","Vancouver Canucks":"VAN","Vegas Golden Knights":"VGK","Washington Capitals":"WSH","Winnipeg Jets":"WPG"};
 
 function nhlMdlGoalDiff(h,a){
-  // Goals per game differential â€” the primary NHL quality signal
+  // Goals per game differential  -  the primary NHL quality signal
   // Pythagorean exp=2.0 works well for hockey
   const hP=pythagorean(h.gf_pg,h.ga_pg,2.0);
   const aP=pythagorean(a.gf_pg,a.ga_pg,2.0);
@@ -293,7 +293,7 @@ function nhlMdlGoalDiff(h,a){
   const aR=pythagorean(a.last10_gf||a.gf_pg,a.last10_ga||a.ga_pg,2.0);
   const hQ=hP*0.60+hR*0.40;
   const aQ=aP*0.60+aR*0.40;
-  // HCA: +0.10 goals â†’ ~pythagorean bump
+  // HCA: +0.10 goals -> ~pythagorean bump
   const hHCA=pythagorean(h.gf_pg+0.10,h.ga_pg,2.0);
   const hAdj=hQ*0.65+hHCA*0.35;
   const hi=injPen(h.roster,0.07,0.035,0.008);
@@ -304,19 +304,19 @@ function nhlMdlGoalDiff(h,a){
   return{homeProb:p,hQ:(hQ*100).toFixed(1),aQ:(aQ*100).toFixed(1),detail:`H Pyth ${(hQ*100).toFixed(1)}%  A Pyth ${(aQ*100).toFixed(1)}%  +0.10G HCA`};}
 
 function nhlMdlGoalie(h,a){
-  // Goalie save% â†’ expected GA â€” most important single NHL factor
+  // Goalie save% -> expected GA  -  most important single NHL factor
   const hSV=Math.max(0.860,Math.min(0.940,(h.goalie?.save_pct||0.905)-(h.goalie?.status==="OUT"?0.025:h.goalie?.status==="DOUBTFUL"?0.015:h.goalie?.status==="QUESTIONABLE"?0.008:0)));
   const aSV=Math.max(0.860,Math.min(0.940,(a.goalie?.save_pct||0.905)-(a.goalie?.status==="OUT"?0.025:a.goalie?.status==="DOUBTFUL"?0.015:a.goalie?.status==="QUESTIONABLE"?0.008:0)));
-  // xGA = shots faced Ã— (1 - SV%)
+  // xGA = shots faced x (1 - SV%)
   const hxGA=(a.shots_pg||30)*(1-hSV);
   const axGA=(h.shots_pg||30)*(1-aSV);
-  // 0.5 goal diff â‰ˆ 9% win prob change in NHL
+  // 0.5 goal diff ~ 9% win prob change in NHL
   const diff=axGA-hxGA+0.10; // +0.10 HCA
   const p=logistic(diff*2.0);
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hSV:hSV.toFixed(3),aSV:aSV.toFixed(3),detail:`H SV% ${hSV.toFixed(3)} xGA ${hxGA.toFixed(2)}  A SV% ${aSV.toFixed(3)} xGA ${axGA.toFixed(2)}`};}
 
 function nhlMdlSpecialTeams(h,a){
-  // PP% and PK% â€” genuinely independent from 5-on-5 goal data
+  // PP% and PK%  -  genuinely independent from 5-on-5 goal data
   const hPP=(h.pp_pct||20)/100;const aPP=(a.pp_pct||20)/100;
   const hPK=(h.pk_pct||80)/100;const aPK=(a.pk_pct||80)/100;
   const hST=hPP*0.57+hPK*0.43;
@@ -328,7 +328,7 @@ function nhlMdlSpecialTeams(h,a){
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hST:(hST*100).toFixed(1),aST:(aST*100).toFixed(1),detail:`H ST: ${(hST*100).toFixed(1)}%  A ST: ${(aST*100).toFixed(1)}%`};}
 
 function nhlMdlShotQuality(h,a){
-  // Shot generation + finishing â€” proxy for possession/Corsi
+  // Shot generation + finishing  -  proxy for possession/Corsi
   // shots_pg / shots_against_pg ratio = season CF%
   const hSh=h.shots_pg||30;const aSh=a.shots_pg||30;
   const hAg=h.shots_against_pg||30;const aAg=a.shots_against_pg||30;
@@ -343,7 +343,7 @@ function nhlMdlShotQuality(h,a){
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hCF:(hCF*100).toFixed(1),aCF:(aCF*100).toFixed(1),detail:`H CF% ${(hCF*100).toFixed(1)}  A CF% ${(aCF*100).toFixed(1)}`};}
 
 function nhlMdlMonteCarlo(h,a,N=10000){
-  // Poisson simulation â€” goals are Poisson distributed
+  // Poisson simulation  -  goals are Poisson distributed
   const hGI=h.goalie?.status==="OUT"?0.32:h.goalie?.status==="DOUBTFUL"?0.20:h.goalie?.status==="QUESTIONABLE"?0.10:0;
   const aGI=a.goalie?.status==="OUT"?0.32:a.goalie?.status==="DOUBTFUL"?0.20:a.goalie?.status==="QUESTIONABLE"?0.10:0;
   const hi=injPen(h.roster,0.065,0.03,0.007);
@@ -406,14 +406,14 @@ function NHLResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
         </div>
         <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr} accent={C.ice}/>
         {(aE||hE)&&<div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>{aE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(aE)>=2?C.ice+"18":C.black,border:"1px solid "+(parseFloat(aE)>=2?C.ice:C.border),fontSize:11,color:parseFloat(aE)>=2?C.ice:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{awayAbbr} Edge: {parseFloat(aE)>=0?"+":""}{aE}%{aEV?" - EV "+(parseFloat(aEV)>=0?"+":"")+aEV+"/$1":""}</div>}{hE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(hE)>=2?C.ice+"18":C.black,border:"1px solid "+(parseFloat(hE)>=2?C.ice:C.border),fontSize:11,color:parseFloat(hE)>=2?C.ice:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{homeAbbr} Edge: {parseFloat(hE)>=0?"+":""}{hE}%{hEV?" - EV "+(parseFloat(hEV)>=0?"+":"")+hEV+"/$1":""}</div>}</div>}
-        {(hI&&aI)&&(()=>{const mktH=hI/(hI+aI);const diff=Math.abs(cH-mktH);const big=diff>=0.10;return big?<div style={{marginTop:10,padding:"10px 14px",background:"#0a121a",border:"1px solid "+C.ice+"66",borderRadius:8,display:"flex",gap:8,alignItems:"flex-start"}}><div style={{fontSize:14,flexShrink:0}}>âš ï¸</div><div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.ice,letterSpacing:1}}>MODEL/MARKET DIVERGENCE</div><div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.6}}>Market implies {(mktH*100).toFixed(0)}% {homeAbbr} / {((1-mktH)*100).toFixed(0)}% {awayAbbr}. Our model says {(cH*100).toFixed(0)}% / {(aw*100).toFixed(0)}%. Gap of {(diff*100).toFixed(0)}%. Verify goalie starter â€” a backup in net will kill this prediction.</div></div></div>:null;})()}
+        {(hI&&aI)&&(()=>{const mktH=hI/(hI+aI);const diff=Math.abs(cH-mktH);const big=diff>=0.10;return big?<div style={{marginTop:10,padding:"10px 14px",background:"#0a121a",border:"1px solid "+C.ice+"66",borderRadius:8,display:"flex",gap:8,alignItems:"flex-start"}}><div style={{fontSize:14,flexShrink:0}}>[!]</div><div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.ice,letterSpacing:1}}>MODEL/MARKET DIVERGENCE</div><div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.6}}>Market implies {(mktH*100).toFixed(0)}% {homeAbbr} / {((1-mktH)*100).toFixed(0)}% {awayAbbr}. Our model says {(cH*100).toFixed(0)}% / {(aw*100).toFixed(0)}%. Gap of {(diff*100).toFixed(0)}%. Verify goalie starter  -  a backup in net will kill this prediction.</div></div></div>:null;})()}
         <button className="hov-btn" onClick={onRecalc} style={{marginTop:12,width:"100%",padding:"9px 0",background:"transparent",border:"1px solid "+C.border,borderRadius:7,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.muted,textTransform:"uppercase"}}>Recalculate with Updated Lineup</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
         <ModelCard icon="GD" name="Goal Differential" desc="Pythagorean win% (exp 2.0) + L10 blend" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-gd.homeProb} detail={gd.detail} accent={C.ice}/>
-        <ModelCard icon="SV%" name="Goalie Model" desc="SV% â†’ xGA â€” biggest single NHL factor" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-gl.homeProb} detail={gl.detail} accent={C.ice}/>
+        <ModelCard icon="SV%" name="Goalie Model" desc="SV% -> xGA  -  biggest single NHL factor" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-gl.homeProb} detail={gl.detail} accent={C.ice}/>
         <ModelCard icon="PP" name="Special Teams" desc="PP% (57%) + PK% (43%) combined score" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-st.homeProb} detail={st.detail} accent={C.ice}/>
-        <ModelCard icon="xG" name="Shot Quality / xG" desc="CF% Ã— shooting% â†’ expected goals" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-sq.homeProb} detail={sq.detail} accent={C.ice}/>
+        <ModelCard icon="xG" name="Shot Quality / xG" desc="CF% x shooting% -> expected goals" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-sq.homeProb} detail={sq.detail} accent={C.ice}/>
       </div>
       <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games - Poisson goal distribution" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={mc.detail} accent={C.ice}/>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
@@ -423,7 +423,7 @@ function NHLResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
         </div>
       </div>
     </>}
-    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["GD","Goal Differential (22%)","Pythagorean win% (exp 2.0) blends 60% season + 40% last-10. HCA = +0.10 goals. Goalie injury applied directly."],["SV%","Goalie Model (30%)","Adj SV% Ã— opp shots = xGA. Goalie out = -0.025 SV% penalty. Highest single NHL predictor."],["PP","Special Teams (17%)","PP% (57%) + PK% (43%). Independent from 5v5 goal data. Home team gets slight PP advantage."],["xG","Shot Quality xG (13%)","CF% Ã— shooting% = expected goals. Captures possession AND finishing skill."],["MC","Monte Carlo (18%)","10,000 Poisson simulations. Goals are Poisson distributed. Ties go ~55% home in OT."],["W","Consensus","Goal Diff 22% + Goalie 30% + Spec Teams 17% + Shot xG 13% + Monte Carlo 18%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.ice+"22",border:"1px solid "+C.ice+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.ice,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.ice,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
+    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["GD","Goal Differential (22%)","Pythagorean win% (exp 2.0) blends 60% season + 40% last-10. HCA = +0.10 goals. Goalie injury applied directly."],["SV%","Goalie Model (30%)","Adj SV% x opp shots = xGA. Goalie out = -0.025 SV% penalty. Highest single NHL predictor."],["PP","Special Teams (17%)","PP% (57%) + PK% (43%). Independent from 5v5 goal data. Home team gets slight PP advantage."],["xG","Shot Quality xG (13%)","CF% x shooting% = expected goals. Captures possession AND finishing skill."],["MC","Monte Carlo (18%)","10,000 Poisson simulations. Goals are Poisson distributed. Ties go ~55% home in OT."],["W","Consensus","Goal Diff 22% + Goalie 30% + Spec Teams 17% + Shot xG 13% + Monte Carlo 18%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.ice+"22",border:"1px solid "+C.ice+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.ice,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.ice,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
   </div>;
 }
 
@@ -481,7 +481,7 @@ const NCAAM_TEAMS=[
 ].sort((a,b)=>a.name.localeCompare(b.name));
 
 function ncaamMdlEfficiency(h,a){
-  // Adjusted efficiency per 100 possessions â€” what KenPom actually measures
+  // Adjusted efficiency per 100 possessions  -  what KenPom actually measures
   // Normalizing by tempo removes pace bias completely
   const hOff=h.ppg/Math.max(h.tempo,55)*100;
   const aDef=a.opp/Math.max(a.tempo,55)*100; // opp's pts ALLOWED per 100
@@ -497,13 +497,13 @@ function ncaamMdlEfficiency(h,a){
   const aRankAdj=(175-aRank)*0.03;
   const hInj=injPen(h.roster,0.10,0.05,0.015);
   const aInj=injPen(a.roster,0.10,0.05,0.015);
-  // HCA 3.5 pts per 100 poss at home â€” empirically ~3.5 for college
+  // HCA 3.5 pts per 100 poss at home  -  empirically ~3.5 for college
   const diff=(hEM+hRankAdj)-(aEM+aRankAdj)+3.5-(hInj-aInj)*22;
   const p=logistic(diff*0.075);
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hEM:((hEM+hRankAdj)).toFixed(1),aEM:((aEM+aRankAdj)).toFixed(1),detail:`H AdjEM ${((hEM+hRankAdj)).toFixed(1)}  A AdjEM ${((aEM+aRankAdj)).toFixed(1)}`};}
 
 function ncaamMdlPythagorean(h,a){
-  // Win quality â€” Pythagorean win% with conference adjustment
+  // Win quality  -  Pythagorean win% with conference adjustment
   // Exponent 11.5 = empirically best for college basketball
   const hP=pythagorean(h.ppg,h.opp,11.5);
   const aP=pythagorean(a.ppg,a.opp,11.5);
@@ -520,7 +520,7 @@ function ncaamMdlPythagorean(h,a){
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hQ:(hQ*100).toFixed(1),aQ:(aQ*100).toFixed(1),detail:`H Pyth ${(hQ*100).toFixed(1)}%  A Pyth ${(aQ*100).toFixed(1)}%  +3.5pt HCA`};}
 
 function ncaamMdlFourFactors(h,a){
-  // Offensive + defensive four factors â€” independent from PPG signal
+  // Offensive + defensive four factors  -  independent from PPG signal
   const offFF=d=>{
     const efg=(d.efg_pct||0.50)*0.40;
     // College TOV rate typically 15-22 per 100; normalize out of 35
@@ -545,7 +545,7 @@ function ncaamMdlFourFactors(h,a){
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hFF:hOff.toFixed(3),aFF:aOff.toFixed(3),detail:`H Off FF: ${hOff.toFixed(3)}  A Off FF: ${aOff.toFixed(3)}`};}
 
 function ncaamMdlTalent(h,a){
-  // Star player talent differential â€” entirely different signal from team stats
+  // Star player talent differential  -  entirely different signal from team stats
   // In college a single star can be worth 15+ points to a team
   const sortH=[...(h.roster||[])].sort((x,y)=>(y.per||0)-(x.per||0));
   const sortA=[...(a.roster||[])].sort((x,y)=>(y.per||0)-(x.per||0));
@@ -715,16 +715,16 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,home
         </div>
         <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr} accent={C.amber}/>
         {(aE||hE)&&<div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>{aE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(aE)>=2?C.amber+"18":C.black,border:"1px solid "+(parseFloat(aE)>=2?C.amber:C.border),fontSize:11,color:parseFloat(aE)>=2?C.amber:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{awayAbbr} Edge: {parseFloat(aE)>=0?"+":""}{aE}%{aEV?" - EV "+(parseFloat(aEV)>=0?"+":"")+aEV+"/$1":""}</div>}{hE&&<div style={{padding:"5px 12px",borderRadius:6,background:parseFloat(hE)>=2?C.amber+"18":C.black,border:"1px solid "+(parseFloat(hE)>=2?C.amber:C.border),fontSize:11,color:parseFloat(hE)>=2?C.amber:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{homeAbbr} Edge: {parseFloat(hE)>=0?"+":""}{hE}%{hEV?" - EV "+(parseFloat(hEV)>=0?"+":"")+hEV+"/$1":""}</div>}</div>}
-        {(hI&&aI)&&(()=>{const mktH=hI/(hI+aI);const diff=Math.abs(cH-mktH);const big=diff>=0.10;return big?<div style={{marginTop:10,padding:"10px 14px",background:"#1a1200",border:"1px solid "+C.amber+"66",borderRadius:8,display:"flex",gap:8,alignItems:"flex-start"}}><div style={{fontSize:14,flexShrink:0}}>âš ï¸</div><div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.amber,letterSpacing:1}}>MODEL/MARKET DIVERGENCE</div><div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.6}}>Market implies {(mktH*100).toFixed(0)}% {homeAbbr} / {((1-mktH)*100).toFixed(0)}% {awayAbbr}. Our model says {(cH*100).toFixed(0)}% / {(aw*100).toFixed(0)}%. Gap of {(diff*100).toFixed(0)}%. College markets move on injury news and home/away venue changes. Verify this is current.</div></div></div>:null;})()}
+        {(hI&&aI)&&(()=>{const mktH=hI/(hI+aI);const diff=Math.abs(cH-mktH);const big=diff>=0.10;return big?<div style={{marginTop:10,padding:"10px 14px",background:"#1a1200",border:"1px solid "+C.amber+"66",borderRadius:8,display:"flex",gap:8,alignItems:"flex-start"}}><div style={{fontSize:14,flexShrink:0}}>[!]</div><div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.amber,letterSpacing:1}}>MODEL/MARKET DIVERGENCE</div><div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.6}}>Market implies {(mktH*100).toFixed(0)}% {homeAbbr} / {((1-mktH)*100).toFixed(0)}% {awayAbbr}. Our model says {(cH*100).toFixed(0)}% / {(aw*100).toFixed(0)}%. Gap of {(diff*100).toFixed(0)}%. College markets move on injury news and home/away venue changes. Verify this is current.</div></div></div>:null;})()}
         <button className="hov-btn" onClick={onRecalc} style={{marginTop:12,width:"100%",padding:"9px 0",background:"transparent",border:"1px solid "+C.border,borderRadius:7,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.muted,textTransform:"uppercase"}}>Recalculate with Updated Injuries</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
         <ModelCard icon="AEM" name="Adj. Efficiency" desc="Pts/100 poss margin + KenPom rank/SOS adj" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-eff.homeProb} detail={eff.detail} accent={C.amber}/>
         <ModelCard icon="PYT" name="Pythagorean" desc="Win quality Pythagorean (exp 11.5) + SOS" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-pyth.homeProb} detail={pyth.detail} accent={C.amber}/>
-        <ModelCard icon="4F" name="Four Factors" desc="Off + Def four factors â€” independent of PPG" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={ff.detail} accent={C.amber}/>
-        <ModelCard icon="TAL" name="Talent Model" desc="Top-3 player PER â€” star power matters most in NCAAM" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-tal.homeProb} detail={tal.detail} accent={C.amber}/>
+        <ModelCard icon="4F" name="Four Factors" desc="Off + Def four factors  -  independent of PPG" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={ff.detail} accent={C.amber}/>
+        <ModelCard icon="TAL" name="Talent Model" desc="Top-3 player PER  -  star power matters most in NCAAM" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-tal.homeProb} detail={tal.detail} accent={C.amber}/>
       </div>
-      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games â€” injury adjusted" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={mc.detail} accent={C.amber}/>
+      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games  -  injury adjusted" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={mc.detail} accent={C.amber}/>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.amber,textTransform:"uppercase",marginBottom:10}}>Model Agreement</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
@@ -732,7 +732,7 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,home
         </div>
       </div>
     </>}
-    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["AEM","Adj Efficiency (28%)","Pts per 100 possessions: offense vs opponent defense. KenPom rank adjusts for schedule strength. +3.5pt HCA."],["PYT","Pythagorean (22%)","Win quality Pythagorean (exp 11.5) with SOS multiplier from KenPom rank. Log5 head-to-head."],["4F","Four Factors (20%)","Offensive (55%) + Defensive (45%) four factors. Entirely independent from PPG signal."],["TAL","Talent Model (13%)","Top-3 player PER weighted by availability. College star impact is larger than NBA. OUT=0%, DOUBTFUL=15%."],["MC","Monte Carlo (17%)","10,000 tempo-adjusted simulations. Game pace = avg of both teams. Ïƒ=10pts per team."],["W","Consensus","Adj Eff 28% + Pythagorean 22% + Four Factors 20% + Talent 13% + Monte Carlo 17%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.amber+"22",border:"1px solid "+C.amber+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.amber,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.amber,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
+    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["AEM","Adj Efficiency (28%)","Pts per 100 possessions: offense vs opponent defense. KenPom rank adjusts for schedule strength. +3.5pt HCA."],["PYT","Pythagorean (22%)","Win quality Pythagorean (exp 11.5) with SOS multiplier from KenPom rank. Log5 head-to-head."],["4F","Four Factors (20%)","Offensive (55%) + Defensive (45%) four factors. Entirely independent from PPG signal."],["TAL","Talent Model (13%)","Top-3 player PER weighted by availability. College star impact is larger than NBA. OUT=0%, DOUBTFUL=15%."],["MC","Monte Carlo (17%)","10,000 tempo-adjusted simulations. Game pace = avg of both teams. sigma=10pts per team."],["W","Consensus","Adj Eff 28% + Pythagorean 22% + Four Factors 20% + Talent 13% + Monte Carlo 17%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.amber+"22",border:"1px solid "+C.amber+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.amber,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.amber,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
   </div>;
 }
 

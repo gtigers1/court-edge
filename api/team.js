@@ -17,20 +17,23 @@ export default async function handler(req, res) {
   try {
     // Step 1: Fetch full roster from ESPN public API (with stats if available)
     const espnSport = sport === "nhl" ? "hockey/nhl" : "basketball/nba";
-    const rosterUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/roster?enable=stats`;
+    const espnSeason = "2026"; // 2025-26 season (year the season ends)
+    const rosterUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/roster?enable=stats&season=${espnSeason}`;
     const rosterResp = await fetch(rosterUrl);
     const rosterJson = await rosterResp.json();
 
     // Step 2: Fetch team record/stats from ESPN
-    const teamUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}`;
+    const teamUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}?season=${espnSeason}`;
     const teamResp = await fetch(teamUrl);
     const teamJson = await teamResp.json();
 
-    // Extract team record
-    const record = teamJson?.team?.record?.items?.[0]?.stats || [];
+    // Extract team record - find the TOTAL/OVERALL record, not home/away/conf splits
+    const recordItems = teamJson?.team?.record?.items || [];
+    const totalRec = recordItems.find(i => i.type === "total" || i.description?.toLowerCase().includes("overall")) || recordItems[0] || {};
+    const record = totalRec.stats || [];
     const getStat = (name) => parseFloat(record.find(s => s.name === name)?.value || 0);
-    const wins = getStat("wins") || parseInt(teamJson?.team?.record?.items?.[0]?.summary?.split("-")[0]) || 30;
-    const losses = getStat("losses") || parseInt(teamJson?.team?.record?.items?.[0]?.summary?.split("-")[1]) || 20;
+    const wins = getStat("wins") || parseInt(totalRec.summary?.split("-")[0]) || 30;
+    const losses = getStat("losses") || parseInt(totalRec.summary?.split("-")[1]) || 20;
 
     // Step 2b: Fetch schedule for L10, rest, home/away splits, Elo, and H2H data
     const teamNumId = String(teamJson?.team?.id || "");
@@ -127,11 +130,22 @@ export default async function handler(req, res) {
 
     // Get player names, positions, and any stats ESPN returns directly
     const playerNames = allPlayers.map(p => {
-      const statsArr = (p.statistics?.splits?.[0]?.stats) || (p.statistics?.stats) || [];
+      // Handle multiple ESPN response formats for stats:
+      // Format A (newer): statistics.splits.categories[].stats
+      // Format B (older): statistics.splits[].stats  (array)
+      // Format C: statistics.categories[].stats
+      // Format D: statistics.stats
+      const rawSplits = p.statistics?.splits;
+      const statsArr = (
+        rawSplits?.categories?.flatMap(c => c.stats || []) ||
+        (Array.isArray(rawSplits) ? rawSplits[0]?.stats : null) ||
+        p.statistics?.categories?.flatMap(c => c.stats || []) ||
+        p.statistics?.stats || []
+      );
       const espnStat = name => { const s = statsArr.find(x => x.name === name || x.abbreviation === name); return s ? parseFloat(s.value) : null; };
-      const ppg = espnStat("avgPoints") ?? espnStat("PTS");
-      const rpg = espnStat("avgRebounds") ?? espnStat("REB");
-      const apg = espnStat("avgAssists") ?? espnStat("AST");
+      const ppg = espnStat("avgPoints") ?? espnStat("pts") ?? espnStat("PTS") ?? espnStat("PPG");
+      const rpg = espnStat("avgRebounds") ?? espnStat("reb") ?? espnStat("REB") ?? espnStat("RPG");
+      const apg = espnStat("avgAssists") ?? espnStat("ast") ?? espnStat("AST") ?? espnStat("APG");
       return {
         name: p.fullName || p.displayName || "Unknown",
         position: p.position?.abbreviation || "F",
@@ -157,8 +171,8 @@ export default async function handler(req, res) {
           max_tokens: 800,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
           messages: [{ role: "user", content: sport === "nhl"
-            ? team + " 2025-26 NHL season wins losses goals-per-game goals-against power-play% penalty-kill% shots-per-game top scorers points goals assists expected starting goalie tonight injury report"
-            : team + " 2025-26 NBA season wins losses points-per-game opponent-points-per-game eFG% turnover-rate offensive-rebound-rate free-throw-rate last 10 games top players scoring rebounds assists averages"
+            ? team + " 2025-26 NHL season stats March 2026: current wins losses goals-per-game goals-against power-play% penalty-kill% shots-per-game top scorers points goals assists expected starting goalie injury report"
+            : team + " 2025-26 NBA season stats March 2026: current record wins losses points-per-game opponent-points-per-game eFG% turnover-rate offensive-rebound-rate free-throw-rate last 10 games record top players scoring rebounds assists"
           }]
         })
       }),
@@ -217,7 +231,10 @@ export default async function handler(req, res) {
     parsed.espn_id = teamNumId;
     parsed.games = teamGames;
     if (sport === "nhl") {
-      parsed.wins=parsed.wins||wins; parsed.losses=parsed.losses||losses; parsed.otl=parsed.otl??5;
+      // Always use ESPN's live record when valid
+      parsed.wins = wins > 0 ? wins : (parsed.wins || 0);
+      parsed.losses = losses > 0 ? losses : (parsed.losses || 0);
+      parsed.otl=parsed.otl??5;
       parsed.points=parsed.points||(parsed.wins*2+parsed.otl); parsed.gf_pg=parsed.gf_pg||3.0;
       parsed.ga_pg=parsed.ga_pg||2.8; parsed.shots_pg=parsed.shots_pg||30;
       parsed.shots_against_pg=parsed.shots_against_pg||28; parsed.pp_pct=parsed.pp_pct||20;
@@ -231,7 +248,9 @@ export default async function handler(req, res) {
       parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",goals:p.goals??0,assists:p.assists??0,points:p.points??0,plus_minus:p.plus_minus??0,position:p.position||"F",role:p.role||"ROLE",status:injuryMap[normN(p.name||"")]||"PLAYING"}));
       if(parsed.goalie){parsed.goalie.status=injuryMap[normN(parsed.goalie.name||"")]||"PLAYING";}
     } else {
-      parsed.wins=parsed.wins||wins; parsed.losses=parsed.losses||losses;
+      // Always use ESPN's live record when valid - never let Claude override it
+      parsed.wins = wins > 0 ? wins : (parsed.wins || 0);
+      parsed.losses = losses > 0 ? losses : (parsed.losses || 0);
       parsed.ppg=parsed.ppg||112; parsed.opp=parsed.opp||112;
       parsed.efg_pct=parsed.efg_pct||0.52; parsed.tov_rate=parsed.tov_rate||13.5;
       parsed.oreb_pct=parsed.oreb_pct||0.26; parsed.ftr=parsed.ftr||0.22;

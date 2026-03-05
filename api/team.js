@@ -32,6 +32,29 @@ export default async function handler(req, res) {
     const wins = getStat("wins") || parseInt(teamJson?.team?.record?.items?.[0]?.summary?.split("-")[0]) || 30;
     const losses = getStat("losses") || parseInt(teamJson?.team?.record?.items?.[0]?.summary?.split("-")[1]) || 20;
 
+    // Step 2b: Fetch last-10 game results from ESPN schedule (more reliable than search)
+    const teamNumId = String(teamJson?.team?.id || "");
+    let l10ppg = null, l10opp = null;
+    try {
+      const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/schedule`);
+      const schedJson = await schedResp.json();
+      const completed = (schedJson?.events || []).filter(e => e.competitions?.[0]?.status?.type?.completed === true);
+      const last10 = completed.slice(-10);
+      let sumFor = 0, sumAgainst = 0, count = 0;
+      for (const ev of last10) {
+        const comp = ev.competitions?.[0];
+        if (!comp) continue;
+        const ours = comp.competitors?.find(c => String(c.id) === teamNumId);
+        const theirs = comp.competitors?.find(c => String(c.id) !== teamNumId);
+        if (ours?.score != null && theirs?.score != null) {
+          sumFor += parseFloat(ours.score) || 0;
+          sumAgainst += parseFloat(theirs.score) || 0;
+          count++;
+        }
+      }
+      if (count >= 3) { l10ppg = sumFor / count; l10opp = sumAgainst / count; }
+    } catch(_) {}
+
     // Step 3: Extract players from ESPN roster API
     const athletes = rosterJson?.athletes || [];
     // NBA returns flat array, NHL returns grouped by position group
@@ -67,7 +90,7 @@ export default async function handler(req, res) {
         max_tokens: 800,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         messages: [{ role: "user", content: sport === "nhl"
-          ? team + " 2025-26 NHL season wins losses goals-per-game goals-against power-play% penalty-kill% shots-per-game top scorers points goals assists last 10 games"
+          ? team + " 2025-26 NHL season wins losses goals-per-game goals-against power-play% penalty-kill% shots-per-game top scorers points goals assists expected starting goalie tonight injury report"
           : team + " 2025-26 NBA season wins losses points-per-game opponent-points-per-game eFG% turnover-rate offensive-rebound-rate free-throw-rate last 10 games top players scoring rebounds assists averages"
         }]
       })
@@ -106,8 +129,10 @@ export default async function handler(req, res) {
       parsed.points=parsed.points||(parsed.wins*2+parsed.otl); parsed.gf_pg=parsed.gf_pg||3.0;
       parsed.ga_pg=parsed.ga_pg||2.8; parsed.shots_pg=parsed.shots_pg||30;
       parsed.shots_against_pg=parsed.shots_against_pg||28; parsed.pp_pct=parsed.pp_pct||20;
-      parsed.pk_pct=parsed.pk_pct||80; parsed.last10_gf=parsed.last10_gf||parsed.gf_pg;
-      parsed.last10_ga=parsed.last10_ga||parsed.ga_pg;
+      parsed.pk_pct=parsed.pk_pct||80;
+      // Prefer ESPN schedule data for L10; NHL goals are lower numbers so divide by 1 (already per-game if count>=3)
+      parsed.last10_gf=l10ppg!=null?parseFloat(l10ppg.toFixed(2)):(parsed.last10_gf||parsed.gf_pg);
+      parsed.last10_ga=l10opp!=null?parseFloat(l10opp.toFixed(2)):(parsed.last10_ga||parsed.ga_pg);
       parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",goals:p.goals??0,assists:p.assists??0,points:p.points??0,plus_minus:p.plus_minus??0,position:p.position||"F",role:p.role||"ROLE",status:"PLAYING"}));
       if(parsed.goalie){parsed.goalie.status="PLAYING";}
     } else {
@@ -117,8 +142,10 @@ export default async function handler(req, res) {
       parsed.oreb_pct=parsed.oreb_pct||0.26; parsed.ftr=parsed.ftr||0.22;
       parsed.opp_efg_pct=parsed.opp_efg_pct||0.52; parsed.opp_tov_rate=parsed.opp_tov_rate||13.5;
       parsed.opp_oreb_pct=parsed.opp_oreb_pct||0.26; parsed.opp_ftr=parsed.opp_ftr||0.22;
-      parsed.last10=parsed.last10||"5-5"; parsed.last10_ppg=parsed.last10_ppg||parsed.ppg;
-      parsed.last10_opp=parsed.last10_opp||parsed.opp;
+      parsed.last10=parsed.last10||"5-5";
+      // Prefer ESPN schedule data (actual game scores) over search-derived estimates
+      parsed.last10_ppg=l10ppg!=null?parseFloat(l10ppg.toFixed(1)):(parsed.last10_ppg||parsed.ppg);
+      parsed.last10_opp=l10opp!=null?parseFloat(l10opp.toFixed(1)):(parsed.last10_opp||parsed.opp);
       parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",ppg:p.ppg||10,rpg:p.rpg||3,apg:p.apg||1,per:p.per||((p.ppg||10)*0.9+(p.rpg||3)*0.3+(p.apg||1)*0.5),role:p.role||"ROLE",status:"PLAYING"}));
     }
     return res.status(200).json(parsed);

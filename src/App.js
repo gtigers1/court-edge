@@ -250,7 +250,9 @@ function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
   const hI=oddsToImplied(homeOdds),aI=oddsToImplied(awayOdds);
   const hE=hI!==null?((cH-hI)*100).toFixed(1):null,aE=aI!==null?((aw-aI)*100).toFixed(1):null;
   const hEV=homeOdds&&hI?calcEV(cH,homeOdds):null,aEV=awayOdds&&aI?calcEV(aw,awayOdds):null;
-  const sig=v=>v>=5?"STRONG BET":v>=2?"LEAN BET":v>=0?"SLIGHT EDGE":"NO VALUE";
+  const allPs=[pyth.homeProb,net.homeProb,ff.homeProb,star.homeProb,mc.homeProb];if(mkt!=null)allPs.push(mkt);
+  const favH=cH>0.5;const agr=allPs.filter(p=>favH?p>0.5:p<0.5).length;const tot=allPs.length;
+  const sig=(edge,a,t)=>a>=t-1&&edge>=3?"STRONG BET":a>=Math.ceil(t*0.67)&&edge>=1?"LEAN BET":a>=Math.ceil(t*0.5)?"SLIGHT EDGE":"MODELS SPLIT";
   return <div className="fade-in">
     <div style={{display:"flex",gap:4,marginBottom:14,background:C.dark,borderRadius:8,padding:4,border:"1px solid "+C.border}}>{[["results","Results"],["method","Methodology"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px 0",borderRadius:6,border:"none",cursor:"pointer",background:tab===k?C.copper+"33":"transparent",color:tab===k?C.copper:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1,textTransform:"uppercase",borderBottom:tab===k?"2px solid "+C.copper:"2px solid transparent"}}>{l}</button>)}</div>
     {tab==="results"&&<>
@@ -258,7 +260,7 @@ function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
         <SectionHeader label="Consensus - 5 Model Weighted Average"/><div style={{height:8}}/>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:16,alignItems:"center",marginBottom:16}}>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={awayAbbr} size={52}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:aw>.55?C.teal:aw>.45?C.copper:C.white}}>{(aw*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{awayTeam}</div></div><OddsPill prob={aw}/></div>
-          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div>{(aE||hE)&&<div style={{padding:"8px 12px",background:C.black,border:"1px solid "+C.border,borderRadius:8}}><div style={{fontFamily:"'Barlow Condensed'",fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1}}>{sig(parseFloat(aw>cH?aE:hE))}</div></div>}</div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div><div style={{padding:"6px 10px",background:C.black,border:"1px solid "+C.border,borderRadius:8,textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontSize:10,fontWeight:800,color:agr>=tot-1?C.teal:agr>=Math.ceil(tot*0.67)?C.copper:C.muted,letterSpacing:1}}>{agr}/{tot} AGREE</div>{(aE||hE)&&<div style={{fontFamily:"'Barlow Condensed'",fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1,marginTop:3}}>{sig(parseFloat(aw>cH?aE:hE),agr,tot)}</div>}</div></div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={homeAbbr} size={52}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:cH>.55?C.teal:cH>.45?C.copper:C.white}}>{(cH*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{homeTeam}</div></div><OddsPill prob={cH}/></div>
         </div>
         <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr}/>
@@ -400,6 +402,9 @@ function NHLResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
   const hI=oddsToImplied(homeOdds),aI=oddsToImplied(awayOdds);
   const hE=hI!==null?((cH-hI)*100).toFixed(1):null,aE=aI!==null?((aw-aI)*100).toFixed(1):null;
   const hEV=homeOdds&&hI?calcEV(cH,homeOdds):null,aEV=awayOdds&&aI?calcEV(aw,awayOdds):null;
+  const allPsH=[gd.homeProb,gl.homeProb,st.homeProb,sq.homeProb,mc.homeProb];if(mkt!=null)allPsH.push(mkt);
+  const favHH=cH>0.5;const agrH=allPsH.filter(p=>favHH?p>0.5:p<0.5).length;const totH=allPsH.length;
+  const sigH=(edge,a,t)=>a>=t-1&&edge>=3?"STRONG BET":a>=Math.ceil(t*0.67)&&edge>=1?"LEAN BET":a>=Math.ceil(t*0.5)?"SLIGHT EDGE":"MODELS SPLIT";
   return <div className="fade-in">
     <div style={{display:"flex",gap:4,marginBottom:14,background:C.dark,borderRadius:8,padding:4,border:"1px solid "+C.border}}>{[["results","Results"],["method","Methodology"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px 0",borderRadius:6,border:"none",cursor:"pointer",background:tab===k?C.ice+"22":"transparent",color:tab===k?C.ice:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1,textTransform:"uppercase",borderBottom:tab===k?"2px solid "+C.ice:"2px solid transparent"}}>{l}</button>)}</div>
     {tab==="results"&&<>
@@ -407,7 +412,7 @@ function NHLResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}><div style={{width:3,height:16,borderRadius:2,background:C.ice}}/><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1.5,color:C.white,textTransform:"uppercase"}}>Consensus - 5 Hockey Models</span></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:16,alignItems:"center",marginBottom:16}}>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={awayAbbr} size={52} accent={C.ice}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:aw>.55?C.ice:aw>.45?C.copper:C.white}}>{(aw*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{awayTeam}</div></div><OddsPill prob={aw} accent={C.ice}/></div>
-          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div><div style={{padding:"6px 10px",background:C.black,border:"1px solid "+C.border,borderRadius:8,textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontSize:10,fontWeight:800,color:agrH>=totH-1?C.ice:agrH>=Math.ceil(totH*0.67)?C.copper:C.muted,letterSpacing:1}}>{agrH}/{totH} AGREE</div>{(aE||hE)&&<div style={{fontFamily:"'Barlow Condensed'",fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1,marginTop:3}}>{sigH(parseFloat(aw>cH?aE:hE),agrH,totH)}</div>}</div></div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={homeAbbr} size={52} accent={C.ice}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:cH>.55?C.ice:cH>.45?C.copper:C.white}}>{(cH*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{homeTeam}</div></div><OddsPill prob={cH} accent={C.ice}/></div>
         </div>
         <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr} accent={C.ice}/>
@@ -711,6 +716,9 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,home
   const hI=oddsToImplied(homeOdds),aI=oddsToImplied(awayOdds);
   const hE=hI!==null?((cH-hI)*100).toFixed(1):null,aE=aI!==null?((aw-aI)*100).toFixed(1):null;
   const hEV=homeOdds&&hI?calcEV(cH,homeOdds):null,aEV=awayOdds&&aI?calcEV(aw,awayOdds):null;
+  const allPsN=[eff.homeProb,pyth.homeProb,ff.homeProb,tal.homeProb,mc.homeProb];if(mkt!=null)allPsN.push(mkt);
+  const favHN=cH>0.5;const agrN=allPsN.filter(p=>favHN?p>0.5:p<0.5).length;const totN=allPsN.length;
+  const sigN=(edge,a,t)=>a>=t-1&&edge>=3?"STRONG BET":a>=Math.ceil(t*0.67)&&edge>=1?"LEAN BET":a>=Math.ceil(t*0.5)?"SLIGHT EDGE":"MODELS SPLIT";
   return <div className="fade-in">
     <div style={{display:"flex",gap:4,marginBottom:14,background:C.dark,borderRadius:8,padding:4,border:"1px solid "+C.border}}>{[["results","Results"],["method","Methodology"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px 0",borderRadius:6,border:"none",cursor:"pointer",background:tab===k?C.amber+"22":"transparent",color:tab===k?C.amber:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1,textTransform:"uppercase",borderBottom:tab===k?"2px solid "+C.amber:"2px solid transparent"}}>{l}</button>)}</div>
     {tab==="results"&&<>
@@ -718,7 +726,7 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,home
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}><div style={{width:3,height:16,borderRadius:2,background:C.amber}}/><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1.5,color:C.white,textTransform:"uppercase"}}>Consensus - 5 College Basketball Models</span></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:16,alignItems:"center",marginBottom:16}}>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={awayAbbr} size={52} accent={C.amber}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:aw>.55?C.amber:aw>.45?C.copper:C.white}}>{(aw*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{awayTeam}</div></div><OddsPill prob={aw} accent={C.amber}/></div>
-          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div><div style={{padding:"6px 10px",background:C.black,border:"1px solid "+C.border,borderRadius:8,textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontSize:10,fontWeight:800,color:agrN>=totN-1?C.amber:agrN>=Math.ceil(totN*0.67)?C.copper:C.muted,letterSpacing:1}}>{agrN}/{totN} AGREE</div>{(aE||hE)&&<div style={{fontFamily:"'Barlow Condensed'",fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1,marginTop:3}}>{sigN(parseFloat(aw>cH?aE:hE),agrN,totN)}</div>}</div></div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={homeAbbr} size={52} accent={C.amber}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:cH>.55?C.amber:cH>.45?C.copper:C.white}}>{(cH*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{homeTeam}</div></div><OddsPill prob={cH} accent={C.amber}/></div>
         </div>
         <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr} accent={C.amber}/>

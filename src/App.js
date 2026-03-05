@@ -13,6 +13,8 @@ const NBA_TZ={"Boston Celtics":"ET","Brooklyn Nets":"ET","New York Knicks":"ET",
 const NHL_TZ={"Boston Bruins":"ET","Buffalo Sabres":"ET","Detroit Red Wings":"ET","Florida Panthers":"ET","Montreal Canadiens":"ET","Ottawa Senators":"ET","Tampa Bay Lightning":"ET","Toronto Maple Leafs":"ET","Carolina Hurricanes":"ET","Columbus Blue Jackets":"ET","New Jersey Devils":"ET","New York Islanders":"ET","New York Rangers":"ET","Philadelphia Flyers":"ET","Pittsburgh Penguins":"ET","Washington Capitals":"ET","Chicago Blackhawks":"CT","Minnesota Wild":"CT","Nashville Predators":"CT","St. Louis Blues":"CT","Winnipeg Jets":"CT","Dallas Stars":"CT","Colorado Avalanche":"MT","Utah Mammoth":"MT","Calgary Flames":"MT","Edmonton Oilers":"MT","Anaheim Ducks":"PT","Los Angeles Kings":"PT","San Jose Sharks":"PT","Seattle Kraken":"PT","Vancouver Canucks":"PT","Vegas Golden Knights":"PT"};
 const ALTITUDE_HOME={"Denver Nuggets":0.025,"Utah Mammoth":0.010,"Colorado Avalanche":0.025};
 function devigged(homeOdds,awayOdds){const h=oddsToImplied(homeOdds),a=oddsToImplied(awayOdds);if(!h||!a)return null;return h/(h+a);}
+// Standard normal CDF (Abramowitz & Stegun approximation, error < 7.5e-8)
+function normalCDF(z){const t=1/(1+0.2316419*Math.abs(z));const p=t*(0.31938153+t*(-0.356563782+t*(1.781477937+t*(-1.821255978+t*1.330274429))));const q=1-Math.exp(-0.5*z*z)/Math.sqrt(2*Math.PI)*p;return z>=0?q:1-q;}
 
 const C={black:"#0A0A0C",dark:"#111116",card:"#16161C",border:"#242430",copper:"#B87333",copperL:"#D4924A",teal:"#2DD4A0",tealD:"#1A9E78",ice:"#A8D8EA",iceD:"#5BAACB",amber:"#F59E0B",amberD:"#D97706",white:"#F0F0F5",muted:"#6B6B80",dim:"#3A3A4A"};
 
@@ -320,6 +322,48 @@ function NBAPage(){
   </div>;
 }
 
+// Shared Best Bets summary - top 3 most confident bets with star ratings
+// sigma = std dev of game margin/total (Normal approximation)
+// NBA: sqrt(2)*11.5 = 16.3 | NHL: ~2.4 (Poisson total goals) | NCAAM: sqrt(2)*10 = 14.1
+function BestBets({results,awayTeam,homeTeam,homeSpread,postedTotal,sport,accent}){
+  if(!results||results.cons==null)return null;
+  const cons=results.cons,ms=parseFloat(results.modelSpread),mt=parseFloat(results.modelTotal);
+  const sigma=sport==="nhl"?2.4:sport==="ncaam"?14.1:16.3;
+  const ac=accent||C.copper;
+  const bets=[];
+  // ML - always available; show the favored side
+  if(cons>=0.5)bets.push({label:homeTeam+" ML",conf:cons});
+  else bets.push({label:awayTeam+" ML",conf:1-cons});
+  // Spread - if user entered spread and model has an expected margin
+  const ps=parseFloat(homeSpread);
+  if(!isNaN(ps)&&!isNaN(ms)){
+    const ph=normalCDF((ms+ps)/sigma);
+    if(ph>=0.5)bets.push({label:homeTeam+" "+homeSpread,conf:ph});
+    else{const al=(-ps)>=0?"+"+(-ps).toFixed(1):(-ps).toFixed(1);bets.push({label:awayTeam+" "+al,conf:1-ph});}
+  }
+  // Total - if user entered total and model has an expected total
+  const pt=parseFloat(postedTotal);
+  if(!isNaN(pt)&&!isNaN(mt)){
+    const po=normalCDF((mt-pt)/sigma);
+    if(po>=0.5)bets.push({label:"Over "+postedTotal,conf:po});
+    else bets.push({label:"Under "+postedTotal,conf:1-po});
+  }
+  const top3=bets.sort((a,b)=>b.conf-a.conf).slice(0,3);
+  if(top3.length===0)return null;
+  const starN=c=>{const p=c*100;return p>=81?5:p>=61?4:p>=41?3:p>=21?2:1;};
+  return <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
+    <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:ac,textTransform:"uppercase",marginBottom:10}}>Best Bets</div>
+    {top3.map((bet,i)=>{const n=starN(bet.conf);return(
+      <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:i<top3.length-1?"1px solid "+C.border+"66":"none"}}>
+        <div style={{display:"flex",gap:1,minWidth:88}}>{Array(5).fill(0).map((_,j)=><span key={j} style={{fontSize:17,color:j<n?C.copper:C.dim}}>&#9733;</span>)}</div>
+        <div style={{flex:1,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:17,letterSpacing:0.5,color:C.white}}>{bet.label}</div>
+        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:ac}}>{(bet.conf*100).toFixed(0)}%</div>
+      </div>
+    );})}
+    <div style={{marginTop:8,fontSize:10,color:C.dim}}>&#9733;&#9733;&#9733;&#9733;&#9733; 81%+ &nbsp;&#9733;&#9733;&#9733;&#9733; 61-80% &nbsp;&#9733;&#9733;&#9733; 41-60%</div>
+  </div>;
+}
+
 function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOdds,homeSpread,postedTotal,tab,setTab,onRecalc}){
   const [copied,setCopied]=useState(false);
   const {pyth,net,ff,star,mc,cons,mkt,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread,modelTotal}=results;const cH=cons,aw=1-cH;
@@ -368,6 +412,7 @@ function NBAResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
         </div>
         {(divGame||altBoost>0||Math.abs(tzAdj)>=0.01||(h2hG&&h2hG.length>=2))&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{divGame&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.amber+"18",color:C.amber,border:"1px solid "+C.amber+"44"}}>DIV GAME - tighter line</span>}{altBoost>0&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.copper+"18",color:C.copper,border:"1px solid "+C.copper+"44"}}>ALTITUDE +{(altBoost*100).toFixed(0)}% {homeAbbr}</span>}{tzAdj>0.01&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.teal+"18",color:C.teal,border:"1px solid "+C.teal+"44"}}>TZ ADV +{(tzAdj*100).toFixed(0)}% {homeAbbr}</span>}{tzAdj<-0.01&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.teal+"18",color:C.teal,border:"1px solid "+C.teal+"44"}}>TZ ADV +{(Math.abs(tzAdj)*100).toFixed(0)}% {awayAbbr}</span>}{h2hG&&h2hG.length>=2&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#a78bfa18",color:"#a78bfa",border:"1px solid #a78bfa44"}}>H2H: {homeAbbr} {h2hW}-{h2hG.length-h2hW} this season</span>}</div>}
       </div>
+      <BestBets results={results} awayTeam={awayTeam} homeTeam={homeTeam} homeSpread={homeSpread} postedTotal={postedTotal} sport="nba" accent={C.copper}/>
     </>}
     {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["PYT","Pythagorean (20%)","Season + L10 Pythagorean win% (exp 13.9). Regresses luck out of raw W/L. HCA via +3.2pt scoring model."],["NET","Net Rating (28%)","55% season + 45% recent PPG-OPP differential. Best single NBA predictor. 1pt ~ +2.7% win probability."],["4F","Four Factors (18%)","eFG%(40%) + TOV%(25%) + OREB%(20%) + FTR(15%). Entirely independent efficiency signal."],["STR","Star Power (16%)","Top-3 PER weighted by injury status: OUT=0%, DOUBTFUL=20%, Q=62%. Top player worth 35% of team score."],["MC","Monte Carlo (18%)","10,000 simulations blending offense vs opponent defense. Normal distribution sigma=11.5pts."],["W","Consensus","Pythagorean 20% + Net Rating 28% + Four Factors 18% + Star Power 16% + Monte Carlo 18%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.copper+"22",border:"1px solid "+C.copper+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.copper,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.copper,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
   </div>;
@@ -564,6 +609,7 @@ function NHLResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
           <div style={{background:C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+C.border}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Projected Score</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:16,color:C.ice,lineHeight:1.4}}>{awayAbbr} {aLambda}<br/>{homeAbbr} {hLambda}</div></div>
         </div>
       </div>}
+      <BestBets results={results} awayTeam={awayTeam} homeTeam={homeTeam} homeSpread={homeSpread} postedTotal={postedTotal} sport="nhl" accent={C.ice}/>
     </>}
     {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["GD","Goal Differential (22%)","Pythagorean win% (exp 2.0) blends 60% season + 40% last-10. HCA = +0.10 goals. Goalie injury applied directly."],["SV%","Goalie Model (30%)","Adj SV% x opp shots = xGA. Goalie out = -0.025 SV% penalty. Highest single NHL predictor."],["PP","Special Teams (17%)","PP% (57%) + PK% (43%). Independent from 5v5 goal data. Home team gets slight PP advantage."],["xG","Shot Quality xG (13%)","CF% x shooting% = expected goals. Captures possession AND finishing skill."],["MC","Monte Carlo (18%)","10,000 Poisson simulations. Goals are Poisson distributed. Ties go ~55% home in OT."],["W","Consensus","Goal Diff 22% + Goalie 30% + Spec Teams 17% + Shot xG 13% + Monte Carlo 18%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.ice+"22",border:"1px solid "+C.ice+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.ice,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.ice,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
   </div>;
@@ -902,6 +948,7 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,home
           <div style={{background:C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+C.border}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Projected Score</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:16,color:C.amber,lineHeight:1.4}}>{awayAbbr} {mc.aExp}<br/>{homeAbbr} {mc.hExp}</div></div>
         </div>
       </div>}
+      <BestBets results={results} awayTeam={awayTeam} homeTeam={homeTeam} homeSpread={homeSpread} postedTotal={postedTotal} sport="ncaam" accent={C.amber}/>
     </>}
     {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["AEM","Adj Efficiency (28%)","Pts per 100 possessions: offense vs opponent defense. KenPom rank adjusts for schedule strength. +3.5pt HCA."],["PYT","Pythagorean (22%)","Win quality Pythagorean (exp 11.5) with SOS multiplier from KenPom rank. Log5 head-to-head."],["4F","Four Factors (20%)","Offensive (55%) + Defensive (45%) four factors. Entirely independent from PPG signal."],["TAL","Talent Model (13%)","Top-3 player PER weighted by availability. College star impact is larger than NBA. OUT=0%, DOUBTFUL=15%."],["MC","Monte Carlo (17%)","10,000 tempo-adjusted simulations. Game pace = avg of both teams. sigma=10pts per team."],["W","Consensus","Adj Eff 28% + Pythagorean 22% + Four Factors 20% + Talent 13% + Monte Carlo 17%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.amber+"22",border:"1px solid "+C.amber+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.amber,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.amber,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
   </div>;

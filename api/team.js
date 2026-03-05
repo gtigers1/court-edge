@@ -14,6 +14,10 @@ export default async function handler(req, res) {
   const slug = sport === "nhl" ? NHL_SLUG[team] : NBA_SLUG[team];
   if (!slug) return res.status(400).json({ error: "Unknown team: " + team });
 
+  // Dynamic date for search queries - always current month/year
+  const now = new Date();
+  const monthYear = now.toLocaleString('en-US', { month: 'long', year: 'numeric' }); // e.g. "April 2026"
+
   try {
     // Step 1: Fetch full roster from ESPN public API (with stats if available)
     const espnSport = sport === "nhl" ? "hockey/nhl" : "basketball/nba";
@@ -43,10 +47,12 @@ export default async function handler(req, res) {
     let teamElo = 1500;
     let teamGames = [];
     let injuryMap = {};
+    let espnTeamStats = {};
     try {
-      const [schedResp, injResp] = await Promise.all([
+      const [schedResp, injResp, statsResp] = await Promise.all([
         fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/schedule`),
-        fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/injuries`)
+        fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/injuries`),
+        fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/statistics?season=${espnSeason}`)
       ]);
       const schedJson = await schedResp.json();
       const completed = (schedJson?.events || []).filter(e => e.competitions?.[0]?.status?.type?.completed === true);
@@ -111,6 +117,52 @@ export default async function handler(req, res) {
           }
         }
       } catch(_) {}
+
+      // ESPN team statistics - live team-level stats (PPG, eFG%, TOV, shots, etc.)
+      try {
+        const sJson = await statsResp.json();
+        const flat = (sJson?.results?.stats?.categories || []).flatMap(c => c.stats || []);
+        const tStat = n => { const s = flat.find(x => x.name === n || x.abbreviation === n); return s ? parseFloat(s.value) : null; };
+        if (sport === "nba") {
+          const ppg  = tStat("avgPoints");
+          const opp  = tStat("avgPointsAllowed");
+          const fgm  = tStat("fieldGoalsMade"),   fga = tStat("fieldGoalsAttempted");
+          const tpm  = tStat("threePointFieldGoalsMade");
+          const fta  = tStat("freeThrowsAttempted");
+          const tov  = tStat("avgTurnovers");
+          const oreb = tStat("avgOffensiveRebounds");
+          const ofgm = tStat("opponentFieldGoalsMade");
+          const ofga = tStat("opponentFieldGoalsAttempted") ?? tStat("oppFieldGoalsAttempted");
+          const otpm = tStat("opponentThreePointFieldGoalsMade");
+          const otov = tStat("opponentTurnovers") ?? tStat("avgOpponentTurnovers");
+          const ofta = tStat("opponentFreeThrowsAttempted") ?? tStat("oppFreeThrowsAttempted");
+          const odreb= tStat("opponentDefensiveRebounds") ?? tStat("avgOpponentDefensiveRebounds");
+          const gp   = tStat("gamesPlayed") || 82;
+          if (ppg)  espnTeamStats.ppg  = parseFloat(ppg.toFixed(1));
+          if (opp)  espnTeamStats.opp  = parseFloat(opp.toFixed(1));
+          if (fgm && fga && tpm) espnTeamStats.efg_pct = parseFloat(((fgm + 0.5*tpm) / fga).toFixed(3));
+          if (tov && fga && fta) espnTeamStats.tov_rate = parseFloat((100 * tov / (fga/gp + 0.44*(fta/gp) + tov)).toFixed(1));
+          if (oreb && odreb) espnTeamStats.oreb_pct = parseFloat((oreb / (oreb + odreb)).toFixed(3));
+          if (fta && fga) espnTeamStats.ftr = parseFloat(((fta/gp) / (fga/gp)).toFixed(3));
+          if (ofgm && ofga && otpm) espnTeamStats.opp_efg_pct = parseFloat(((ofgm + 0.5*otpm) / ofga).toFixed(3));
+          if (otov && ofga && ofta) espnTeamStats.opp_tov_rate = parseFloat((100 * otov / (ofga/gp + 0.44*(ofta/gp) + otov)).toFixed(1));
+        } else {
+          const gf   = tStat("avgGoals") ?? tStat("goals");
+          const ga   = tStat("goalsAgainst") ?? tStat("avgGoalsAgainst");
+          const shots= tStat("avgShotsOnGoal") ?? tStat("shotsOnGoal");
+          const sa   = tStat("avgShotsAgainst") ?? tStat("shotsAgainst");
+          const ppGls= tStat("powerPlayGoals");
+          const ppo  = tStat("powerPlayOpportunities");
+          const ppga = tStat("powerPlayGoalsAllowed");
+          const ppoa = tStat("powerPlayOpportunitiesAllowed") ?? tStat("penaltyKillOpportunities");
+          if (gf)    espnTeamStats.gf_pg   = parseFloat((gf).toFixed(2));
+          if (ga)    espnTeamStats.ga_pg   = parseFloat((ga).toFixed(2));
+          if (shots) espnTeamStats.shots_pg = parseFloat((shots).toFixed(1));
+          if (sa)    espnTeamStats.shots_against_pg = parseFloat((sa).toFixed(1));
+          if (ppGls != null && ppo > 0) espnTeamStats.pp_pct = parseFloat((ppGls / ppo * 100).toFixed(1));
+          if (ppga != null && ppoa > 0) espnTeamStats.pk_pct = parseFloat(((1 - ppga/ppoa) * 100).toFixed(1));
+        }
+      } catch(_) {}
     } catch(_) {}
 
     // Step 3: Extract players from ESPN roster API
@@ -171,8 +223,8 @@ export default async function handler(req, res) {
           max_tokens: 800,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
           messages: [{ role: "user", content: sport === "nhl"
-            ? team + " 2025-26 NHL season stats March 2026: current wins losses goals-per-game goals-against power-play% penalty-kill% shots-per-game top scorers points goals assists expected starting goalie injury report"
-            : team + " 2025-26 NBA season stats March 2026: current record wins losses points-per-game opponent-points-per-game eFG% turnover-rate offensive-rebound-rate free-throw-rate last 10 games record top players scoring rebounds assists"
+            ? team + " NHL " + monthYear + " expected starting goalie tonight, last 10 games record, injury report"
+            : team + " NBA " + monthYear + " last 10 games record wins losses, notable injuries or lineup changes"
           }]
         })
       }),
@@ -265,6 +317,9 @@ export default async function handler(req, res) {
       const normN = s => (s||"").toLowerCase().replace(/[^a-z]/g,"");
       parsed.roster=(parsed.roster||[]).map(p=>({name:p.name||"Unknown",ppg:p.ppg||10,rpg:p.rpg||3,apg:p.apg||1,per:p.per||((p.ppg||10)*0.9+(p.rpg||3)*0.3+(p.apg||1)*0.5),role:p.role||"ROLE",status:injuryMap[normN(p.name||"")]||"PLAYING"}));
     }
+    // Always override with ESPN's live team stats (PPG, OPP, eFG%, shots, etc.)
+    // espnTeamStats only contains keys ESPN returned; this does not touch roster or record
+    if (Object.keys(espnTeamStats).length > 0) Object.assign(parsed, espnTeamStats);
     return res.status(200).json(parsed);
   } catch (err) {
     return res.status(500).json({ error: err.message });

@@ -32,40 +32,38 @@ export default async function handler(req, res) {
     const wins = getStat("wins") || parseInt(teamJson?.team?.record?.items?.[0]?.summary?.split("-")[0]) || 30;
     const losses = getStat("losses") || parseInt(teamJson?.team?.record?.items?.[0]?.summary?.split("-")[1]) || 20;
 
-    // Step 2b: Fetch schedule for L10, rest days, and home/away splits
+    // Step 2b: Fetch schedule for L10, rest, home/away splits, Elo, and H2H data
     const teamNumId = String(teamJson?.team?.id || "");
     let l10ppg = null, l10opp = null;
-    let daysSinceLastGame = 2; // default: assume rested
-    let hSplit = null, aSplit = null; // home/away scoring splits
+    let daysSinceLastGame = 2;
+    let hSplit = null, aSplit = null;
+    let teamElo = 1500;
+    let teamGames = [];
     try {
       const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSport}/teams/${slug}/schedule`);
       const schedJson = await schedResp.json();
       const completed = (schedJson?.events || []).filter(e => e.competitions?.[0]?.status?.type?.completed === true);
-      const last10 = completed.slice(-10);
 
-      // Rest: days since last game
+      // Rest
       if (completed.length > 0) {
         const lastDate = new Date(completed[completed.length - 1].date);
         daysSinceLastGame = Math.max(0, Math.floor((new Date() - lastDate) / (1000 * 60 * 60 * 24)));
       }
 
-      // L10 scoring averages
-      let sumFor = 0, sumAgainst = 0, count = 0;
+      // L10
+      const last10 = completed.slice(-10);
+      let l10SF = 0, l10AG = 0, l10Cnt = 0;
       for (const ev of last10) {
         const comp = ev.competitions?.[0];
-        if (!comp) continue;
-        const ours = comp.competitors?.find(c => String(c.id) === teamNumId);
-        const theirs = comp.competitors?.find(c => String(c.id) !== teamNumId);
-        if (ours?.score != null && theirs?.score != null) {
-          sumFor += parseFloat(ours.score) || 0;
-          sumAgainst += parseFloat(theirs.score) || 0;
-          count++;
-        }
+        const ours = comp?.competitors?.find(c => String(c.id) === teamNumId);
+        const theirs = comp?.competitors?.find(c => String(c.id) !== teamNumId);
+        if (ours?.score != null && theirs?.score != null) { l10SF += parseFloat(ours.score)||0; l10AG += parseFloat(theirs.score)||0; l10Cnt++; }
       }
-      if (count >= 3) { l10ppg = sumFor / count; l10opp = sumAgainst / count; }
+      if (l10Cnt >= 3) { l10ppg = l10SF / l10Cnt; l10opp = l10AG / l10Cnt; }
 
-      // Home/Away splits (full season)
+      // Single pass: home/away splits + Elo + H2H game log
       let hSF = 0, hAG = 0, hCnt = 0, aSF = 0, aAG = 0, aCnt = 0;
+      const ELO_K = 30;
       for (const ev of completed) {
         const comp = ev.competitions?.[0];
         if (!comp) continue;
@@ -73,8 +71,15 @@ export default async function handler(req, res) {
         const theirs = comp.competitors?.find(c => String(c.id) !== teamNumId);
         if (!ours || !theirs || ours.score == null || theirs.score == null) continue;
         const s = parseFloat(ours.score) || 0, t = parseFloat(theirs.score) || 0;
-        if (ours.homeAway === "home") { hSF += s; hAG += t; hCnt++; }
-        else { aSF += s; aAG += t; aCnt++; }
+        const isHome = ours.homeAway === "home";
+        const win = s > t ? 1 : 0;
+        if (theirs.id) teamGames.push({ opp: String(theirs.id), win: win === 1 });
+        const effElo = teamElo + (isHome ? 50 : -50);
+        const expected = 1 / (1 + Math.pow(10, (1500 - effElo) / 400));
+        const margin = Math.abs(s - t);
+        const marginMult = Math.max(0.5, Math.log(margin + 1) / Math.log(15));
+        teamElo += ELO_K * marginMult * (win - expected);
+        if (isHome) { hSF += s; hAG += t; hCnt++; } else { aSF += s; aAG += t; aCnt++; }
       }
       if (hCnt >= 8) hSplit = { sf: hSF / hCnt, ag: hAG / hCnt };
       if (aCnt >= 8) aSplit = { sf: aSF / aCnt, ag: aAG / aCnt };
@@ -183,6 +188,9 @@ export default async function handler(req, res) {
 
     // Normalize
     parsed.rest = daysSinceLastGame;
+    parsed.elo = Math.round(teamElo);
+    parsed.espn_id = teamNumId;
+    parsed.games = teamGames;
     if (sport === "nhl") {
       parsed.wins=parsed.wins||wins; parsed.losses=parsed.losses||losses; parsed.otl=parsed.otl??5;
       parsed.points=parsed.points||(parsed.wins*2+parsed.otl); parsed.gf_pg=parsed.gf_pg||3.0;

@@ -18,9 +18,11 @@ export default async function handler(req, res) {
     const wins = parseInt(parts[0]) || 15;
     const losses = parseInt(parts[1]) || 15;
 
-    // Fetch schedule for rest days
+    // Fetch schedule for rest days, Elo, and H2H
     const teamNumId = String(teamJson?.team?.id || teamId || "");
     let daysSinceLastGame = 2;
+    let teamElo = 1500;
+    let teamGames = [];
     try {
       const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}/schedule`);
       const schedJson = await schedResp.json();
@@ -29,7 +31,26 @@ export default async function handler(req, res) {
         const lastDate = new Date(completed[completed.length - 1].date);
         daysSinceLastGame = Math.max(0, Math.floor((new Date() - lastDate) / (1000 * 60 * 60 * 24)));
       }
+      const ELO_K = 30;
+      for (const ev of completed) {
+        const comp = ev.competitions?.[0];
+        if (!comp) continue;
+        const ours = comp.competitors?.find(c => String(c.id) === teamNumId);
+        const theirs = comp.competitors?.find(c => String(c.id) !== teamNumId);
+        if (!ours || !theirs || ours.score == null || theirs.score == null) continue;
+        const s = parseFloat(ours.score)||0, t = parseFloat(theirs.score)||0;
+        const isHome = ours.homeAway === "home";
+        const win = s > t ? 1 : 0;
+        if (theirs.id) teamGames.push({ opp: String(theirs.id), win: win === 1 });
+        const effElo = teamElo + (isHome ? 50 : -50);
+        const expected = 1 / (1 + Math.pow(10, (1500 - effElo) / 400));
+        const margin = Math.abs(s - t);
+        teamElo += ELO_K * Math.max(0.5, Math.log(margin + 1) / Math.log(15)) * (win - expected);
+      }
     } catch(_) {}
+    // Try ESPN NET ranking
+    const rankings = teamJson?.team?.rankings || [];
+    const espnNetRank = rankings.find(r => (r.type?.displayName||"").toLowerCase().includes("net") || (r.name||"").toLowerCase().includes("net"))?.current || null;
 
     const athletes = rosterJson?.athletes || [];
     let allPlayers = [];
@@ -97,6 +118,10 @@ export default async function handler(req, res) {
     parsed.ranking = parsed.ranking || 0;
     parsed.kenpom_rank = parsed.kenpom_rank || 150;
     parsed.rest = daysSinceLastGame;
+    parsed.elo = Math.round(teamElo);
+    parsed.espn_id = teamNumId;
+    parsed.games = teamGames;
+    if (espnNetRank) parsed.kenpom_rank = espnNetRank;
     parsed.roster = (parsed.roster || []).map(p => ({
       name: p.name || "Unknown",
       ppg: p.ppg || 5,

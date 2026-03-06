@@ -288,7 +288,7 @@ export default async function handler(req, res) {
       try {
         const espnAthleteStats = await Promise.all(
           allPlayers.slice(0, 20).map(p =>
-            p.id ? fetch(`https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/athletes/${p.id}/statistics/0`)
+            p.id ? fetch(`https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/${espnSeason}/types/2/athletes/${p.id}/statistics`)
               .then(r => r.ok ? r.json() : null).catch(() => null)
             : Promise.resolve(null)
           )

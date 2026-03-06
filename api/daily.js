@@ -12,20 +12,22 @@ export default async function handler(req, res) {
       ? `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${dateParam}`
       : `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard`;
 
-    // Odds API: 24h window starting at noon ET (17:00 UTC) on the requested date
-    // Returns empty for past dates, current/future lines for upcoming games
-    let oddsUrl = `https://api.the-odds-api.com/v4/sports/basketball_nba/odds/?apiKey=${oddsKey}&regions=us&markets=h2h,spreads,totals&bookmakers=fanduel&oddsFormat=american`;
-    if (oddsKey && dateParam) {
-      const y=dateParam.slice(0,4), m=dateParam.slice(4,6), d=dateParam.slice(6,8);
-      const tFrom = new Date(`${y}-${m}-${d}T17:00:00Z`); // noon ET
-      const tTo   = new Date(tFrom.getTime() + 24*60*60*1000);
-      oddsUrl += `&commenceTimeFrom=${tFrom.toISOString()}&commenceTimeTo=${tTo.toISOString()}`;
-    }
+    // Odds API: NO date filter - the endpoint returns all upcoming/live events naturally.
+    // NBA games start 7-11 PM ET = 00:00-04:00 UTC next day, so a UTC date window
+    // would miss them. Instead we fetch all upcoming games and match by team name.
+    // For past dates the API returns nothing -> graceful model-projection fallback.
+    const isPast = (() => {
+      if (!dateParam) return false;
+      const today = new Date();
+      const ty = today.getFullYear(), tm = String(today.getMonth()+1).padStart(2,'0'), td = String(today.getDate()).padStart(2,'0');
+      return dateParam < `${ty}${tm}${td}`;
+    })();
+    const oddsUrl = `https://api.the-odds-api.com/v4/sports/basketball_nba/odds/?apiKey=${oddsKey}&regions=us&markets=h2h,spreads,totals&bookmakers=fanduel&oddsFormat=american`;
 
     // Fetch ESPN scoreboard + FanDuel odds in parallel
     const [sbResp, fdRaw] = await Promise.all([
       fetch(sbUrl),
-      oddsKey
+      oddsKey && !isPast
         ? fetch(oddsUrl).then(r => r.ok ? r.json() : null).catch(() => null)
         : Promise.resolve(null),
     ]);

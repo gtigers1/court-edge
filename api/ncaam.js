@@ -2,8 +2,9 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not set" });
+  const pplxKey = process.env.PERPLEXITY_API_KEY;
+  const apiKey  = process.env.ANTHROPIC_API_KEY; // fallback only
+  if (!pplxKey && !apiKey) return res.status(500).json({ error: "PERPLEXITY_API_KEY not set" });
   const { teamId, team } = req.body || {};
   if (!teamId) return res.status(400).json({ error: "teamId required" });
 
@@ -48,6 +49,7 @@ export default async function handler(req, res) {
         teamElo += ELO_K * Math.max(0.5, Math.log(margin + 1) / Math.log(15)) * (win - expected);
       }
     } catch(_) {}
+
     // Try ESPN NET ranking
     const rankings = teamJson?.team?.rankings || [];
     const espnNetRank = rankings.find(r => (r.type?.displayName||"").toLowerCase().includes("net") || (r.name||"").toLowerCase().includes("net"))?.current || null;
@@ -67,34 +69,43 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "ESPN roster empty for " + team, rosterUrl });
     }
 
-    const search = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 800,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{ role: "user", content: team + " 2025-26 NCAA basketball stats wins losses ppg opponent-ppg efg% turnover rate offensive rebound rate free throw rate tempo kenpom rank player scoring averages" }]
-      })
-    });
-    const sd = await search.json();
-    const searchText = (sd.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 2000);
-
     const schema = '{"wins":0,"losses":0,"ppg":75.0,"opp":70.0,"tempo":68.0,"efg_pct":0.52,"tov_rate":16.0,"oreb_pct":0.30,"ft_rate":0.35,"opp_efg_pct":0.50,"opp_tov_rate":16.0,"opp_oreb_pct":0.28,"conference":"Big Ten","ranking":0,"kenpom_rank":100,"roster":[{"name":"Player Name","ppg":15.0,"rpg":5.0,"apg":3.0,"per":18.0,"role":"STAR","status":"PLAYING"}]}';
 
-    const fmt = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2500,
-        system: "Output only a single raw JSON object. No markdown, no explanation, no code fences.",
-        messages: [{ role: "user", content: "Build JSON for " + team + " college basketball 2025-26 season.\n\nRoster (use EXACT names, include ALL):\n" + playerNames.join(", ") + "\n\nStats data:\n" + searchText + "\n\nSchema:\n" + schema + "\n\nRules: Include EVERY player in roster array. role=STAR if ppg>15, KEY if ppg>8, else ROLE. per=ppg*1.1+rpg*0.3+apg*0.4. ranking=AP poll rank 0 if unranked. kenpom_rank=estimated 1-364." }]
-      })
-    });
-    const fd = await fmt.json();
-    if (!fmt.ok) return res.status(502).json({ error: fd.error?.message || "Format error" });
-    const raw = (fd.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+    let raw = "";
+
+    if (pplxKey) {
+      // Single Perplexity Sonar call: search + format in one shot (faster, cheaper, more current)
+      const r = await fetch("https://api.perplexity.ai/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${pplxKey}` },
+        body: JSON.stringify({
+          model: "sonar-pro",
+          messages: [
+            { role: "system", content: "You are a sports data API. Search the web for current stats and return only a valid JSON object. No markdown, no code fences, no explanation." },
+            { role: "user", content: `Search for current 2025-26 NCAA basketball season stats for ${team}. Return this exact JSON schema filled with real data:\n${schema}\n\nRoster - include ALL players below using their EXACT names:\n${playerNames.join(", ")}\n\nRules: wins/losses from current record. ppg/opp = current season averages. tempo from KenPom or Barttorvik. efg_pct as decimal (e.g. 0.52). ranking = AP poll rank (0 if unranked). kenpom_rank = KenPom rank. For each player: ppg/rpg/apg = per game averages this season. role: STAR if ppg>15, KEY if ppg>8, else ROLE. per = ppg*1.1+rpg*0.3+apg*0.4.` }
+          ],
+          response_format: { type: "json_object" }
+        })
+      });
+      const d = await r.json();
+      raw = d.choices?.[0]?.message?.content || "";
+    } else {
+      // Fallback: Anthropic (two-call search + format)
+      const search = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 800, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: team + " 2025-26 NCAA basketball stats wins losses ppg opponent-ppg efg% turnover rate offensive rebound rate free throw rate tempo kenpom rank player scoring averages" }] })
+      });
+      const sd = await search.json();
+      const searchText = (sd.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 2000);
+      const fmt = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 2500, system: "Output only a single raw JSON object. No markdown, no explanation, no code fences.", messages: [{ role: "user", content: "Build JSON for " + team + " college basketball 2025-26 season.\n\nRoster (use EXACT names, include ALL):\n" + playerNames.join(", ") + "\n\nStats data:\n" + searchText + "\n\nSchema:\n" + schema + "\n\nRules: Include EVERY player in roster array. role=STAR if ppg>15, KEY if ppg>8, else ROLE. per=ppg*1.1+rpg*0.3+apg*0.4. ranking=AP poll rank 0 if unranked. kenpom_rank=estimated 1-364." }] })
+      });
+      const fd = await fmt.json();
+      raw = (fd.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+    }
 
     let parsed = null;
     try { parsed = JSON.parse(raw); } catch(_) {}

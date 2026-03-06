@@ -2,8 +2,9 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not set" });
+  const pplxKey = process.env.PERPLEXITY_API_KEY;
+  const apiKey  = process.env.ANTHROPIC_API_KEY; // fallback only
+  if (!pplxKey && !apiKey) return res.status(500).json({ error: "PERPLEXITY_API_KEY not set" });
   const { team, sport } = req.body || {};
   if (!team) return res.status(400).json({ error: "team required" });
 
@@ -326,76 +327,82 @@ export default async function handler(req, res) {
         return res.status(200).json({ ...baseResult, roster: buildRoster(updated) });
       }
 
-      // Tier 3: Dual parallel Haiku searches (split roster in half for double coverage) + Sonnet roster
-      const half = Math.ceil(playerNames.length / 2);
-      const names1 = playerNames.slice(0, half).map(p => p.name).join(", ");
-      const names2 = playerNames.slice(half).map(p => p.name).join(", ");
-      const haikuCall = (names) => fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 1000,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{ role: "user", content: team + " NBA 2025-26 season stats per game " + monthYear + ": " + names + ". List PPG RPG APG for each player." }]
-        })
-      });
-      const [r1, r2] = await Promise.all([haikuCall(names1), haikuCall(names2)]);
-      const [j1, j2] = await Promise.all([r1.json(), r2.json()]);
-      const txt = (arr) => (arr.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 1200);
-      const playerSearchText = txt(j1) + "\n\n" + txt(j2);
-
-      const rosterSchema = '[{"name":"exact name from list","ppg":20.0,"rpg":5.0,"apg":3.0}]';
-      const fmt = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1200,
-          system: "Output only a raw JSON array. No markdown, no explanation, no code fences.",
-          messages: [{ role: "user", content: "Extract per-game stats for ALL " + team + " NBA players from the search results below.\n\nPlayer list (use EXACT names, include ALL):\n" + playerNames.map(p => p.name).join(", ") + "\n\nStats data:\n" + playerSearchText + "\n\nSchema:\n" + rosterSchema + "\n\nInclude EVERY player. Use real stats from the data; use 5/2/1 only if genuinely not found." }]
-        })
-      });
-      const fd = await fmt.json();
-      const rawRoster = (fd.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+      // Tier 3: Perplexity Sonar (search + format in one call) — replaces 3 Anthropic calls
       let rosterArr = null;
-      try { rosterArr = JSON.parse(rawRoster); } catch(_) {}
-      if (!rosterArr) { try { rosterArr = JSON.parse(rawRoster.replace(/^```json\s*/i,"").replace(/\s*```$/,"")); } catch(_) {} }
-      if (!rosterArr) { try { const i=rawRoster.indexOf("["),j=rawRoster.lastIndexOf("]"); if(i>=0&&j>i) rosterArr=JSON.parse(rawRoster.slice(i,j+1)); } catch(_) {} }
+      const nameListNBA = playerNames.map(p => p.name).join(", ");
+      if (pplxKey) {
+        try {
+          const r = await fetch("https://api.perplexity.ai/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${pplxKey}` },
+            body: JSON.stringify({
+              model: "sonar-pro",
+              messages: [
+                { role: "system", content: "You are a sports data API. Search the web for current NBA player stats and return only a valid JSON object. No markdown, no code fences." },
+                { role: "user", content: `Search current 2025-26 NBA season per-game stats for ${team} players. Return JSON object with a "players" array:\n{"players":[{"name":"exact name","ppg":20.0,"rpg":5.0,"apg":3.0}]}\n\nInclude ALL players below using their EXACT names:\n${nameListNBA}` }
+              ],
+              response_format: { type: "json_object" }
+            })
+          });
+          const d = await r.json();
+          const raw = d.choices?.[0]?.message?.content || "";
+          let parsed = null;
+          try { parsed = JSON.parse(raw); } catch(_) {}
+          if (!parsed) { try { const i=raw.indexOf("{"),j=raw.lastIndexOf("}"); if(i>=0&&j>i) parsed=JSON.parse(raw.slice(i,j+1)); } catch(_) {} }
+          rosterArr = parsed?.players || parsed?.roster || null;
+          if (Array.isArray(parsed) && parsed.length) rosterArr = parsed;
+        } catch(_) {}
+      } else if (apiKey) {
+        // Fallback: Anthropic dual-Haiku search + Sonnet format
+        const half = Math.ceil(playerNames.length / 2);
+        const [r1, r2] = await Promise.all([
+          fetch("https://api.anthropic.com/v1/messages", { method:"POST", headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"}, body: JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:1000, tools:[{type:"web_search_20250305",name:"web_search"}], messages:[{role:"user",content:team+" NBA 2025-26 stats "+monthYear+": "+playerNames.slice(0,half).map(p=>p.name).join(", ")+". List PPG RPG APG."}] }) }),
+          fetch("https://api.anthropic.com/v1/messages", { method:"POST", headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"}, body: JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:1000, tools:[{type:"web_search_20250305",name:"web_search"}], messages:[{role:"user",content:team+" NBA 2025-26 stats "+monthYear+": "+playerNames.slice(half).map(p=>p.name).join(", ")+". List PPG RPG APG."}] }) })
+        ]);
+        const [j1,j2] = await Promise.all([r1.json(),r2.json()]);
+        const txt = arr => (arr.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").slice(0,1200);
+        const fmt = await fetch("https://api.anthropic.com/v1/messages", { method:"POST", headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"}, body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1200, system:"Output only a raw JSON array. No markdown.", messages:[{role:"user",content:"Extract per-game stats for ALL "+team+" players.\n\nPlayers: "+nameListNBA+"\n\nData:\n"+txt(j1)+"\n\n"+txt(j2)+'\n\nSchema: [{"name":"exact name","ppg":20.0,"rpg":5.0,"apg":3.0}]\n\nInclude EVERY player.'}] }) });
+        const fd = await fmt.json();
+        const rawR = (fd.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").trim();
+        try { rosterArr = JSON.parse(rawR); } catch(_) {}
+        if (!rosterArr) { try { const i=rawR.indexOf("["),j=rawR.lastIndexOf("]"); if(i>=0&&j>i) rosterArr=JSON.parse(rawR.slice(i,j+1)); } catch(_) {} }
+      }
 
       return res.status(200).json({ ...baseResult, roster: buildRoster(rosterArr || playerNames) });
     }
 
-    // Step 5: NHL path - Haiku search for goalie/context, then Sonnet to format roster
-    // (NHL player stats not publicly available, must use AI search)
+    // Step 5: NHL path - Perplexity Sonar (search + format in one call, faster + cheaper)
+    // (NHL player stats not publicly available via free API, must use AI search)
     const nameList = playerNames.map(p => p.name + " (" + p.position + ")").join(", ");
-    const search = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 800,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{ role: "user", content: team + " NHL " + monthYear + " expected starting goalie tonight, last 10 games record, injury report" }]
-      })
-    });
-    const sd = await search.json();
-    const searchText = (sd.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 1500);
-
     const nhlSchema = '{"wins":0,"losses":0,"otl":0,"points":0,"gf_pg":3.0,"ga_pg":2.8,"shots_pg":30,"shots_against_pg":28,"pp_pct":22,"pk_pct":80,"last10_gf":3.0,"last10_ga":2.8,"goalie":{"name":"exact goalie name","save_pct":0.910,"gaa":2.80,"status":"PLAYING"},"roster":[{"name":"exact name","goals":10,"assists":20,"points":30,"plus_minus":5,"position":"LW","role":"KEY","status":"PLAYING"}]}';
-    const fmt = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2500,
-        system: "Output only a single raw JSON object. No markdown, no explanation, no code fences.",
-        messages: [{ role: "user", content: "Build JSON for " + team + " NHL.\n\nALL players (use EXACT names, include ALL of them):\n" + nameList + "\n\nTeam stats:\n" + searchText + "\n\nSchema:\n" + nhlSchema + "\n\nCRITICAL: Include EVERY player in the list above in the roster array. Separate goalies from skaters - put starting goalie in goalie field, rest in roster. role=STAR if points>40, KEY if points>20, else ROLE. Use position from the list." }]
-      })
-    });
-    const fd = await fmt.json();
-    if (!fmt.ok) return res.status(502).json({ error: fd.error?.message || "Format error" });
-    const raw = (fd.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+
+    let raw = "";
+    if (pplxKey) {
+      // Single Perplexity Sonar call: replaces 2 Anthropic calls
+      const r = await fetch("https://api.perplexity.ai/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${pplxKey}` },
+        body: JSON.stringify({
+          model: "sonar-pro",
+          messages: [
+            { role: "system", content: "You are a sports data API. Search the web for current NHL stats and return only a valid JSON object. No markdown, no code fences, no explanation." },
+            { role: "user", content: `Search for current 2025-26 NHL season stats for ${team} including expected starting goalie, player points/goals/assists, last 10 games, injuries. Return this exact JSON schema filled with real data:\n${nhlSchema}\n\nALL players (use EXACT names, include ALL skaters):\n${nameList}\n\nCRITICAL: Include EVERY skater in roster array. Put starting goalie in goalie field only. role: STAR if points>40, KEY if points>20, else ROLE. Use position from the list above.` }
+          ],
+          response_format: { type: "json_object" }
+        })
+      });
+      const d = await r.json();
+      raw = d.choices?.[0]?.message?.content || "";
+    } else {
+      // Fallback: Anthropic two-call search + format
+      const search = await fetch("https://api.anthropic.com/v1/messages", { method:"POST", headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"}, body: JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:800, tools:[{type:"web_search_20250305",name:"web_search"}], messages:[{role:"user",content:team+" NHL "+monthYear+" expected starting goalie tonight, last 10 games record, injury report"}] }) });
+      const sd = await search.json();
+      const searchText = (sd.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").slice(0,1500);
+      const fmt = await fetch("https://api.anthropic.com/v1/messages", { method:"POST", headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"}, body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:2500, system:"Output only a single raw JSON object. No markdown, no explanation, no code fences.", messages:[{role:"user",content:"Build JSON for "+team+" NHL.\n\nALL players:\n"+nameList+"\n\nTeam stats:\n"+searchText+"\n\nSchema:\n"+nhlSchema+"\n\nInclude EVERY player. Put starting goalie in goalie field. role=STAR if points>40, KEY if points>20, else ROLE."}] }) });
+      const fd = await fmt.json();
+      if (!fmt.ok) return res.status(502).json({ error: fd.error?.message || "Format error" });
+      raw = (fd.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").trim();
+    }
 
     let parsed = null;
     try { parsed = JSON.parse(raw); } catch(_) {}

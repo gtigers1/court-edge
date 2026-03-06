@@ -283,23 +283,55 @@ export default async function handler(req, res) {
         return res.status(200).json({ ...baseResult, roster: buildRoster(playerNames) });
       }
 
-      // Fallback: NBA.com blocked - use Haiku to find player stats, Sonnet to format roster only
-      // Team stats already captured above from ESPN, so Sonnet only handles the roster array
-      const nameList = playerNames.map(p => p.name).join(", ");
-      const playerSearchResp = await fetch("https://api.anthropic.com/v1/messages", {
+      // Tier 2: Try ESPN per-athlete stats API (~200ms, no AI needed)
+      // sports.core.api.espn.com returns current season stats per athlete ID
+      try {
+        const espnAthleteStats = await Promise.all(
+          allPlayers.slice(0, 20).map(p =>
+            p.id ? fetch(`https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/athletes/${p.id}/statistics/0`)
+              .then(r => r.ok ? r.json() : null).catch(() => null)
+            : Promise.resolve(null)
+          )
+        );
+        const players20 = allPlayers.slice(0, 20);
+        for (let i = 0; i < players20.length; i++) {
+          const d = espnAthleteStats[i];
+          if (!d) continue;
+          const flat = (d.splits?.categories || []).flatMap(c => c.stats || []);
+          const gs = n => { const s = flat.find(x => x.name === n || x.abbreviation === n); return s ? parseFloat(s.value) : null; };
+          const ppg = gs("avgPoints") ?? gs("points");
+          const rpg = gs("avgRebounds") ?? gs("rebounds");
+          const apg = gs("avgAssists") ?? gs("assists");
+          if (ppg !== null) {
+            nbaStatsMap[normKey(players20[i].fullName || players20[i].displayName || "")] = { ppg, rpg, apg };
+          }
+        }
+      } catch(_) {}
+
+      if (Object.keys(nbaStatsMap).length >= 8) {
+        const updated = playerNames.map(p => { const s = nbaStatsMap[normKey(p.name)]; return s ? { ...p, ...s } : p; });
+        return res.status(200).json({ ...baseResult, roster: buildRoster(updated) });
+      }
+
+      // Tier 3: Dual parallel Haiku searches (split roster in half for double coverage) + Sonnet roster
+      const half = Math.ceil(playerNames.length / 2);
+      const names1 = playerNames.slice(0, half).map(p => p.name).join(", ");
+      const names2 = playerNames.slice(half).map(p => p.name).join(", ");
+      const haikuCall = (names) => fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
           max_tokens: 1000,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{ role: "user", content: team + " 2025-26 NBA player stats per game " + monthYear + ": " + nameList + ". Find PPG RPG APG for each player this season." }]
+          messages: [{ role: "user", content: team + " NBA 2025-26 season stats per game " + monthYear + ": " + names + ". List PPG RPG APG for each player." }]
         })
       });
-      const psd = await playerSearchResp.json();
-      const playerSearchText = (psd.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 1500);
+      const [r1, r2] = await Promise.all([haikuCall(names1), haikuCall(names2)]);
+      const [j1, j2] = await Promise.all([r1.json(), r2.json()]);
+      const txt = (arr) => (arr.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 1200);
+      const playerSearchText = txt(j1) + "\n\n" + txt(j2);
 
-      // Sonnet formats roster only (much faster than full team JSON - no team stats needed)
       const rosterSchema = '[{"name":"exact name from list","ppg":20.0,"rpg":5.0,"apg":3.0}]';
       const fmt = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -308,7 +340,7 @@ export default async function handler(req, res) {
           model: "claude-sonnet-4-20250514",
           max_tokens: 1200,
           system: "Output only a raw JSON array. No markdown, no explanation, no code fences.",
-          messages: [{ role: "user", content: "Extract per-game stats for ALL " + team + " NBA players from the search results below.\n\nPlayer list (use EXACT names, include ALL):\n" + nameList + "\n\nStats data:\n" + playerSearchText + "\n\nSchema:\n" + rosterSchema + "\n\nInclude EVERY player in the list. Use real stats from the data; if not found use 5/2/1 as placeholder." }]
+          messages: [{ role: "user", content: "Extract per-game stats for ALL " + team + " NBA players from the search results below.\n\nPlayer list (use EXACT names, include ALL):\n" + playerNames.map(p => p.name).join(", ") + "\n\nStats data:\n" + playerSearchText + "\n\nSchema:\n" + rosterSchema + "\n\nInclude EVERY player. Use real stats from the data; use 5/2/1 only if genuinely not found." }]
         })
       });
       const fd = await fmt.json();

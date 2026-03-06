@@ -1028,23 +1028,56 @@ function DailyGameCard({game}){
   </div>;
 }
 function DailyPage(){
+  const toYMD=d=>{const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;};
+  const todayYMD=toYMD(new Date());
+  const [selDate,setSelDate]=useState(todayYMD);
+  const [center,setCenter]=useState(todayYMD);
   const [data,setData]=useState(null);
   const [loading,setLoading]=useState(true);
   const [err,setErr]=useState(null);
+
+  // 7 days centered on `center`
+  const days=Array.from({length:7},(_,i)=>{const d=new Date(center+"T12:00:00");d.setDate(d.getDate()-3+i);return toYMD(d);});
+
+  const shiftCenter=n=>{const d=new Date(center+"T12:00:00");d.setDate(d.getDate()+n);setCenter(toYMD(d));};
+
+  const selectDay=ymd=>{
+    setSelDate(ymd);
+    if(!days.includes(ymd))setCenter(ymd);
+  };
+
   useEffect(()=>{
     setLoading(true);setErr(null);
-    fetch("/api/daily").then(r=>r.json()).then(d=>{setData(d);setLoading(false);}).catch(e=>{setErr(e.message);setLoading(false);});
-  },[]);
-  if(loading)return <div style={{textAlign:"center",padding:60,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:18,letterSpacing:2}}>LOADING TODAY'S GAMES...</div>;
-  if(err)return <div style={{textAlign:"center",padding:60,color:C.copper,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16}}>{err}</div>;
-  if(!data?.games?.length)return <div style={{textAlign:"center",padding:60,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,letterSpacing:2}}>NO NBA GAMES TODAY</div>;
-  const dt=data.date?new Date(data.date).toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"}):"";
+    const apiDate=selDate.replace(/-/g,"");
+    fetch(`/api/daily?date=${apiDate}`).then(r=>r.json()).then(d=>{setData(d);setLoading(false);}).catch(e=>{setErr(e.message);setLoading(false);});
+  },[selDate]);
+
+  const dayFmt=ymd=>{const d=new Date(ymd+"T12:00:00");return{dow:d.toLocaleDateString("en-US",{weekday:"short"}).toUpperCase(),mon:d.toLocaleDateString("en-US",{month:"short"}).toUpperCase(),day:d.getDate()};};
+
   return <div>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-      <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.copper,letterSpacing:2}}>{dt.toUpperCase()}</div>
-      <div style={{padding:"5px 12px",borderRadius:20,background:C.card,border:"1px solid "+C.border,fontFamily:"'Barlow Condensed'",fontSize:12,color:C.muted,fontWeight:700}}>{data.games.length} GAME{data.games.length!==1?"S":""}</div>
+    {/* Date navigation bar */}
+    <div style={{background:C.dark,border:"1px solid "+C.border,borderRadius:12,marginBottom:16,overflow:"hidden"}}>
+      <div style={{display:"flex",alignItems:"center"}}>
+        <button onClick={()=>shiftCenter(-1)} style={{background:"none",border:"none",cursor:"pointer",padding:"0 14px",height:64,color:C.copper,fontSize:22,lineHeight:1,display:"flex",alignItems:"center",flexShrink:0}}>&#8249;</button>
+        <div style={{display:"flex",flex:1}}>
+          {days.map(ymd=>{
+            const {dow,mon,day}=dayFmt(ymd);
+            const isSel=ymd===selDate;
+            const isT=ymd===todayYMD;
+            return <button key={ymd} onClick={()=>selectDay(ymd)} style={{flex:1,background:isSel?"linear-gradient(135deg,"+C.copper+"22,"+C.copper+"0a)":"none",border:"none",borderBottom:isSel?"2px solid "+C.copper:"2px solid transparent",cursor:"pointer",padding:"10px 2px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,transition:"all .15s",minWidth:0}}>
+              <span style={{fontFamily:"'Barlow Condensed'",fontSize:10,fontWeight:700,color:isSel?C.copper:C.muted,letterSpacing:1}}>{dow}</span>
+              <span style={{fontFamily:"'Barlow Condensed'",fontSize:13,fontWeight:isSel||isT?900:600,color:isSel?C.copper:isT?C.white:C.muted,whiteSpace:"nowrap"}}>{mon} {day}</span>
+            </button>;
+          })}
+        </div>
+        <button onClick={()=>shiftCenter(1)} style={{background:"none",border:"none",cursor:"pointer",padding:"0 14px",height:64,color:C.copper,fontSize:22,lineHeight:1,display:"flex",alignItems:"center",flexShrink:0}}>&#8250;</button>
+      </div>
     </div>
-    {data.games.map(game=><DailyGameCard key={game.id} game={game}/>)}
+    {/* Games list */}
+    {loading&&<div style={{textAlign:"center",padding:60,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:18,letterSpacing:2}}>LOADING GAMES...</div>}
+    {err&&<div style={{textAlign:"center",padding:60,color:C.copper,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16}}>{err}</div>}
+    {!loading&&!err&&!data?.games?.length&&<div style={{textAlign:"center",padding:60,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,letterSpacing:2}}>NO NBA GAMES ON THIS DATE</div>}
+    {!loading&&!err&&data?.games?.map(game=><DailyGameCard key={game.id} game={game}/>)}
   </div>;
 }
 

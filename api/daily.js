@@ -4,21 +4,46 @@ export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).end();
 
   try {
-    // Fetch today's NBA scoreboard
-    const sbResp = await fetch("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard");
+    const oddsKey = process.env.ODDS_API_KEY;
+
+    // Fetch ESPN scoreboard + FanDuel odds in parallel
+    const [sbResp, fdRaw] = await Promise.all([
+      fetch("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"),
+      oddsKey
+        ? fetch(`https://api.the-odds-api.com/v4/sports/basketball_nba/odds/?apiKey=${oddsKey}&regions=us&markets=h2h,spreads,totals&bookmakers=fanduel&oddsFormat=american`)
+            .then(r => r.ok ? r.json() : null).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+
     const sb = await sbResp.json();
     const events = sb.events || [];
     if (events.length === 0) return res.status(200).json({ games: [], date: new Date().toISOString() });
 
-    // Collect unique team IDs from all today's games
+    // Build FanDuel odds map keyed by lowercase home team name
+    const fdMap = {};
+    if (Array.isArray(fdRaw)) {
+      for (const g of fdRaw) {
+        const fd = g.bookmakers?.find(b => b.key === "fanduel");
+        if (!fd) continue;
+        const h2h     = fd.markets?.find(m => m.key === "h2h");
+        const spreads = fd.markets?.find(m => m.key === "spreads");
+        const totals  = fd.markets?.find(m => m.key === "totals");
+        const ht = g.home_team, at = g.away_team;
+        const homeML    = h2h?.outcomes?.find(o => o.name === ht)?.price ?? null;
+        const awayML    = h2h?.outcomes?.find(o => o.name === at)?.price ?? null;
+        const spread    = spreads?.outcomes?.find(o => o.name === ht)?.point ?? null;
+        const overUnder = totals?.outcomes?.find(o => o.name === "Over")?.point ?? null;
+        fdMap[ht.toLowerCase()] = { spread, overUnder, homeML, awayML, source: "fanduel" };
+      }
+    }
+
+    // Collect unique team IDs and fetch season stats in parallel
     const teamIdSet = new Set();
     for (const ev of events) {
       for (const c of (ev.competitions?.[0]?.competitors || [])) {
         if (c.team?.id) teamIdSet.add(c.team.id);
       }
     }
-
-    // Fetch season stats for every team in parallel (PPG + OPP for scoring model)
     const teamIds = [...teamIdSet];
     const teamStatResults = await Promise.all(
       teamIds.map(id =>
@@ -47,10 +72,11 @@ export default async function handler(req, res) {
       const awayComp = comp.competitors?.find(c => c.homeAway === "away");
       if (!homeComp || !awayComp) return null;
 
-      const homeId = homeComp.team?.id;
-      const awayId = awayComp.team?.id;
+      const homeId   = homeComp.team?.id;
+      const awayId   = awayComp.team?.id;
+      const homeName = homeComp.team?.displayName || "";
 
-      // Season records - prefer "total" type
+      // Season records
       const getRec = (competitor) => {
         const r = competitor.records?.find(r => r.type === "total") || competitor.records?.[0];
         return r?.summary || "0-0";
@@ -61,42 +87,40 @@ export default async function handler(req, res) {
       const [homeW, homeL] = parseRec(homeRecStr);
       const [awayW, awayL] = parseRec(awayRecStr);
 
-      // Betting odds from ESPN (first provider, usually Caesars or consensus)
-      const oddsData = comp.odds?.[0] || {};
-      const spread    = oddsData.spread != null ? parseFloat(oddsData.spread) : null;       // home spread (neg = home fav)
-      const overUnder = oddsData.overUnder != null ? parseFloat(oddsData.overUnder) : null;
-      const homeML    = oddsData.homeTeamOdds?.moneyLine ?? null;
-      const awayML    = oddsData.awayTeamOdds?.moneyLine ?? null;
+      // Odds priority: FanDuel > ESPN scoreboard > null
+      const fdOdds = fdMap[homeName.toLowerCase()] || null;
+      const espnOdds = comp.odds?.[0] || {};
+      const spread    = fdOdds?.spread    ?? (espnOdds.spread    != null ? parseFloat(espnOdds.spread)    : null);
+      const overUnder = fdOdds?.overUnder ?? (espnOdds.overUnder != null ? parseFloat(espnOdds.overUnder) : null);
+      const homeML    = fdOdds?.homeML    ?? espnOdds.homeTeamOdds?.moneyLine ?? null;
+      const awayML    = fdOdds?.awayML    ?? espnOdds.awayTeamOdds?.moneyLine ?? null;
+      const oddsSource = fdOdds ? "fanduel" : (espnOdds.provider ? "espn" : null);
 
       // --- Scoring model ---
       const hSt = teamStats[homeId] || { ppg: 112, opp: 112 };
       const aSt = teamStats[awayId] || { ppg: 112, opp: 112 };
-      const HOME_COURT = 1.75; // ~3.5 pt HCA split evenly
-      const predHome  = (hSt.ppg + aSt.opp) / 2 + HOME_COURT;
-      const predAway  = (aSt.ppg + hSt.opp) / 2 - HOME_COURT;
-      const predMargin = predHome - predAway; // positive = home team wins by this amount
+      const HOME_COURT = 1.75;
+      const predHome   = (hSt.ppg + aSt.opp) / 2 + HOME_COURT;
+      const predAway   = (aSt.ppg + hSt.opp) / 2 - HOME_COURT;
+      const predMargin = predHome - predAway;
       const predTotal  = predHome + predAway;
 
       // --- Pythagorean win probability ---
-      const homeGP = homeW + homeL || 1;
-      const awayGP = awayW + awayL || 1;
-      const homeWR = homeW / homeGP;
-      const awayWR = awayW / awayGP;
-      const denom  = homeWR + awayWR + 0.08;
+      const homeGP  = homeW + homeL || 1;
+      const awayGP  = awayW + awayL || 1;
+      const homeWR  = homeW / homeGP;
+      const awayWR  = awayW / awayGP;
+      const denom   = homeWR + awayWR + 0.08;
       const pythProb = denom > 0 ? (homeWR + 0.04) / denom : 0.54;
 
-      // --- Scoring-based win prob (sigmoid on margin) ---
+      // --- Scoring-based win prob ---
       const scoringProb = 0.5 + Math.sign(predMargin) * Math.min(0.45, Math.abs(predMargin) / 40);
-
-      // Blend 50/50
       const homeWinProb = pythProb * 0.5 + scoringProb * 0.5;
 
       // --- Picks ---
-      const mlPick     = homeWinProb >= 0.5 ? "home" : "away";
-      // spreadPick: home covers if (predicted margin) beats the spread line
-      // e.g. home -6.5: spread = -6.5. Home covers if predMargin > 6.5, i.e. predMargin + spread > 0
-      const spreadPick  = spread != null ? (predMargin + spread > 0 ? "home" : "away") : mlPick;
-      const totalPick   = overUnder != null ? (predTotal > overUnder ? "over" : "under") : "over";
+      const mlPick    = homeWinProb >= 0.5 ? "home" : "away";
+      const spreadPick = spread != null ? (predMargin + spread > 0 ? "home" : "away") : mlPick;
+      const totalPick  = overUnder != null ? (predTotal > overUnder ? "over" : "under") : (predMargin >= 0 ? "over" : "under");
 
       return {
         id: ev.id,
@@ -105,7 +129,7 @@ export default async function handler(req, res) {
         statusDetail: comp.status?.type?.shortDetail || "",
         homeTeam: {
           id: homeId,
-          name: homeComp.team?.displayName,
+          name: homeName,
           abbr: homeComp.team?.abbreviation,
           logo: homeComp.team?.logo,
           record: homeRecStr,
@@ -119,7 +143,7 @@ export default async function handler(req, res) {
           record: awayRecStr,
           score: comp.status?.type?.state !== "pre" ? awayComp.score : null,
         },
-        odds: { spread, overUnder, homeML, awayML },
+        odds: { spread, overUnder, homeML, awayML, source: oddsSource },
         prediction: {
           mlPick, spreadPick, totalPick,
           homeWinProb: parseFloat(homeWinProb.toFixed(3)),

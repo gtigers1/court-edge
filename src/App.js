@@ -958,7 +958,7 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,home
 // --- DAILY GAMES ---
 function DailyGameCard({game}){
   const {homeTeam,awayTeam,odds,prediction,time,status,statusDetail}=game;
-  const {spread,overUnder,homeML,awayML}=odds||{};
+  const {spread,overUnder,homeML,awayML,source}=odds||{};
   const {mlPick,spreadPick,totalPick,homeWinProb,predMargin,predTotal}=prediction;
   const fml=v=>v==null?"-":v>0?("+"+v):String(v);
   const fspread=v=>v==null?"-":v===0?"PK":v>0?("+"+v):String(v);
@@ -966,7 +966,8 @@ function DailyGameCard({game}){
   const isLive=status==="in";
   const isFinal=status==="post";
   const acc=C.copper;
-  // When ESPN drops odds (live/final games), fall back to model projections
+  const isFanDuel=source==="fanduel";
+  // When no real odds available, fall back to model projections
   const noOdds=spread==null&&overUnder==null&&homeML==null&&awayML==null;
   const dHomeSpread=spread!=null?fspread(spread):fspread(parseFloat((-predMargin).toFixed(1)));
   const dAwaySpread=spread!=null?fspread(-spread):fspread(parseFloat(predMargin.toFixed(1)));
@@ -980,7 +981,8 @@ function DailyGameCard({game}){
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 14px",borderBottom:"1px solid "+C.border,background:C.dark}}>
       <span style={{fontFamily:"'Barlow Condensed'",fontSize:12,color:C.muted,fontWeight:700,letterSpacing:1}}>{gameTime}</span>
       <div style={{display:"flex",gap:6,alignItems:"center"}}>
-        {noOdds&&<span style={{fontSize:9,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1,background:C.dim,borderRadius:3,padding:"1px 6px"}}>PROJ ODDS</span>}
+        {isFanDuel&&<span style={{fontSize:9,color:"#1da0f2",fontFamily:"'Barlow Condensed'",fontWeight:800,letterSpacing:1,background:"#1da0f211",border:"1px solid #1da0f233",borderRadius:3,padding:"1px 6px"}}>FANDUEL</span>}
+        {!isFanDuel&&noOdds&&<span style={{fontSize:9,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1,background:C.dim,borderRadius:3,padding:"1px 6px"}}>PROJ ODDS</span>}
         {isLive&&<span style={{background:C.copper+"33",border:"1px solid "+C.copper+"66",borderRadius:4,padding:"2px 8px",fontSize:10,color:C.copper,fontFamily:"'Barlow Condensed'",fontWeight:800,letterSpacing:1}}>LIVE - {statusDetail}</span>}
         {isFinal&&<span style={{background:C.teal+"22",border:"1px solid "+C.teal+"44",borderRadius:4,padding:"2px 8px",fontSize:10,color:C.teal,fontFamily:"'Barlow Condensed'",fontWeight:800,letterSpacing:1}}>FINAL</span>}
         {!isLive&&!isFinal&&<span style={{background:C.dim,borderRadius:4,padding:"2px 8px",fontSize:10,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1}}>SCHEDULED</span>}

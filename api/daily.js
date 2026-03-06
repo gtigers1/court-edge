@@ -52,7 +52,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // Collect unique team IDs and fetch season stats in parallel
+    // Collect unique team IDs and fetch each team's schedule to compute PPG + OPP from real game scores
+    // ESPN's stats endpoint has no avgPointsAllowed field, so we aggregate from results
     const teamIdSet = new Set();
     for (const ev of events) {
       for (const c of (ev.competitions?.[0]?.competitors || [])) {
@@ -60,22 +61,29 @@ export default async function handler(req, res) {
       }
     }
     const teamIds = [...teamIdSet];
-    const teamStatResults = await Promise.all(
+    const schedResults = await Promise.all(
       teamIds.map(id =>
-        fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${id}/statistics?season=2026`)
+        fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${id}/schedule?season=2026`)
           .then(r => r.ok ? r.json() : null).catch(() => null)
       )
     );
 
     const teamStats = {};
     for (let i = 0; i < teamIds.length; i++) {
-      const d = teamStatResults[i];
+      const d = schedResults[i];
       if (!d) continue;
-      const flat = (d?.results?.stats?.categories || []).flatMap(c => c.stats || []);
-      const tStat = n => { const s = flat.find(x => x.name === n); return s ? parseFloat(s.value) : null; };
+      let pts = 0, opp = 0, gp = 0;
+      for (const ev of (d.events || [])) {
+        const comp = ev.competitions?.[0];
+        if (!comp?.status?.type?.completed) continue;
+        const tc = comp.competitors?.find(c => c.team?.id === String(teamIds[i]));
+        const oc = comp.competitors?.find(c => c.team?.id !== String(teamIds[i]));
+        const p = parseFloat(tc?.score?.value), o = parseFloat(oc?.score?.value);
+        if (!isNaN(p) && !isNaN(o)) { pts += p; opp += o; gp++; }
+      }
       teamStats[teamIds[i]] = {
-        ppg: tStat("avgPoints") || 112,
-        opp: tStat("avgPointsAllowed") || 112,
+        ppg: gp > 0 ? pts / gp : 112,
+        opp: gp > 0 ? opp / gp : 112,
       };
     }
 

@@ -962,19 +962,21 @@ function DailyGameCard({game}){
   const {mlPick,spreadPick,totalPick,homeWinProb,predMargin,predTotal}=prediction;
   const fml=v=>v==null?"-":v>0?("+"+v):String(v);
   const fspread=v=>v==null?"-":v===0?"PK":v>0?("+"+v):String(v);
+  const rHalf=v=>Math.round(v*2)/2; // round to nearest 0.5 like sportsbooks
+  const fHalf=v=>Number.isInteger(v)?String(v):v.toFixed(1); // "227" or "227.5"
   const gameTime=time?new Date(time).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZoneName:"short"}):"";
   const isLive=status==="in";
   const isFinal=status==="post";
   const acc=C.copper;
   const isFanDuel=source==="fanduel";
-  // When no real odds available, fall back to model projections
+  // When no real odds available, fall back to model projections (rounded to nearest 0.5)
   const noOdds=spread==null&&overUnder==null&&homeML==null&&awayML==null;
-  const dHomeSpread=spread!=null?fspread(spread):fspread(parseFloat((-predMargin).toFixed(1)));
-  const dAwaySpread=spread!=null?fspread(-spread):fspread(parseFloat(predMargin.toFixed(1)));
+  const dHomeSpread=spread!=null?fspread(spread):fspread(rHalf(-predMargin));
+  const dAwaySpread=spread!=null?fspread(-spread):fspread(rHalf(predMargin));
   const dHomeML=homeML!=null?fml(homeML):probToAmerican(homeWinProb);
   const dAwayML=awayML!=null?fml(awayML):probToAmerican(1-homeWinProb);
-  const dOverTotal=overUnder!=null?"O "+overUnder:"O "+predTotal.toFixed(1);
-  const dUnderTotal=overUnder!=null?"U "+overUnder:"U "+predTotal.toFixed(1);
+  const dOverTotal=overUnder!=null?"O "+overUnder:"O "+fHalf(rHalf(predTotal));
+  const dUnderTotal=overUnder!=null?"U "+overUnder:"U "+fHalf(rHalf(predTotal));
   const pickBox=on=>({flex:1,textAlign:"center",padding:"12px 8px",background:on?acc+"22":"transparent",borderLeft:"1px solid "+C.border,borderBottom:on?"2px solid "+acc:"2px solid transparent",transition:"all .2s"});
   const pickLabel=on=>on?<div style={{fontSize:8,color:acc,fontFamily:"'Barlow Condensed'",fontWeight:800,letterSpacing:1,marginTop:2}}>MODEL</div>:null;
   return <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:12}}>

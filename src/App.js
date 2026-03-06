@@ -955,9 +955,91 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,home
 }
 
 // â”€â”€â”€ APP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- DAILY GAMES ---
+function DailyGameCard({game}){
+  const {homeTeam,awayTeam,odds,prediction,time,status,statusDetail}=game;
+  const {spread,overUnder,homeML,awayML}=odds||{};
+  const {mlPick,spreadPick,totalPick,homeWinProb,predMargin,predTotal}=prediction;
+  const fml=v=>v==null?"-":v>0?("+"+v):String(v);
+  const fspread=v=>v==null?"-":v===0?"PK":v>0?("+"+v):String(v);
+  const homeSpreadStr=fspread(spread);
+  const awaySpreadStr=fspread(spread!=null?-spread:null);
+  const gameTime=time?new Date(time).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZoneName:"short"}):"";
+  const isLive=status==="in";
+  const isFinal=status==="post";
+  const acc=C.copper;
+  const pickBox=on=>({flex:1,textAlign:"center",padding:"12px 8px",background:on?acc+"22":"transparent",borderLeft:"1px solid "+C.border,borderBottom:on?"2px solid "+acc:"2px solid transparent",transition:"all .2s"});
+  const pickLabel=on=>on?<div style={{fontSize:8,color:acc,fontFamily:"'Barlow Condensed'",fontWeight:800,letterSpacing:1,marginTop:2}}>MODEL</div>:null;
+  return <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:12}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 14px",borderBottom:"1px solid "+C.border,background:C.dark}}>
+      <span style={{fontFamily:"'Barlow Condensed'",fontSize:12,color:C.muted,fontWeight:700,letterSpacing:1}}>{gameTime}</span>
+      <div style={{display:"flex",gap:6}}>
+        {isLive&&<span style={{background:C.copper+"33",border:"1px solid "+C.copper+"66",borderRadius:4,padding:"2px 8px",fontSize:10,color:C.copper,fontFamily:"'Barlow Condensed'",fontWeight:800,letterSpacing:1}}>LIVE - {statusDetail}</span>}
+        {isFinal&&<span style={{background:C.teal+"22",border:"1px solid "+C.teal+"44",borderRadius:4,padding:"2px 8px",fontSize:10,color:C.teal,fontFamily:"'Barlow Condensed'",fontWeight:800,letterSpacing:1}}>FINAL</span>}
+        {!isLive&&!isFinal&&<span style={{background:C.dim,borderRadius:4,padding:"2px 8px",fontSize:10,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1}}>SCHEDULED</span>}
+      </div>
+    </div>
+    <div style={{display:"flex",borderBottom:"1px solid "+C.border}}>
+      <div style={{flex:2.5,padding:"5px 14px"}}></div>
+      {["SPREAD","MONEY","TOTAL"].map(h=><div key={h} style={{flex:1,textAlign:"center",padding:"5px 4px",fontFamily:"'Barlow Condensed'",fontSize:10,color:C.muted,fontWeight:800,letterSpacing:1,borderLeft:"1px solid "+C.border}}>{h}</div>)}
+    </div>
+    <div style={{display:"flex",alignItems:"stretch",borderBottom:"1px solid "+C.border+"88"}}>
+      <div style={{flex:2.5,display:"flex",alignItems:"center",gap:10,padding:"12px 14px"}}>
+        {awayTeam.logo&&<img src={awayTeam.logo} alt="" style={{width:30,height:30,objectFit:"contain"}}/>}
+        <div style={{flex:1}}>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:16,color:C.white,lineHeight:1}}>{awayTeam.abbr}</div>
+          <div style={{fontSize:10,color:C.muted,marginTop:2}}>{awayTeam.record}</div>
+        </div>
+        {(isLive||isFinal)&&awayTeam.score!=null&&<span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:24,color:C.white}}>{awayTeam.score}</span>}
+      </div>
+      <div style={pickBox(spreadPick==="away")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:spreadPick==="away"?acc:C.white}}>{awaySpreadStr}</div>{pickLabel(spreadPick==="away")}</div>
+      <div style={pickBox(mlPick==="away")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:mlPick==="away"?acc:C.white}}>{fml(awayML)}</div>{pickLabel(mlPick==="away")}</div>
+      <div style={pickBox(totalPick==="over")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:totalPick==="over"?acc:C.white}}>{overUnder!=null?"O "+overUnder:"-"}</div>{pickLabel(totalPick==="over")}</div>
+    </div>
+    <div style={{display:"flex",alignItems:"stretch"}}>
+      <div style={{flex:2.5,display:"flex",alignItems:"center",gap:10,padding:"12px 14px"}}>
+        {homeTeam.logo&&<img src={homeTeam.logo} alt="" style={{width:30,height:30,objectFit:"contain"}}/>}
+        <div style={{flex:1}}>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:16,color:C.white,lineHeight:1}}>{homeTeam.abbr}</div>
+          <div style={{fontSize:10,color:C.muted,marginTop:2}}>{homeTeam.record}</div>
+        </div>
+        {(isLive||isFinal)&&homeTeam.score!=null&&<span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:24,color:C.white}}>{homeTeam.score}</span>}
+      </div>
+      <div style={pickBox(spreadPick==="home")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:spreadPick==="home"?acc:C.white}}>{homeSpreadStr}</div>{pickLabel(spreadPick==="home")}</div>
+      <div style={pickBox(mlPick==="home")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:mlPick==="home"?acc:C.white}}>{fml(homeML)}</div>{pickLabel(mlPick==="home")}</div>
+      <div style={pickBox(totalPick==="under")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:totalPick==="under"?acc:C.white}}>{overUnder!=null?"U "+overUnder:"-"}</div>{pickLabel(totalPick==="under")}</div>
+    </div>
+    <div style={{borderTop:"1px solid "+C.border,padding:"8px 14px",display:"flex",gap:20,flexWrap:"wrap",background:C.dark}}>
+      <span style={{fontSize:11,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>MODEL: <b style={{color:C.white}}>{Math.round(homeWinProb*100)}% {homeTeam.abbr}</b></span>
+      <span style={{fontSize:11,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>PROJ MARGIN: <b style={{color:acc}}>{predMargin>0?homeTeam.abbr+" -"+predMargin.toFixed(1):awayTeam.abbr+" -"+Math.abs(predMargin).toFixed(1)}</b></span>
+      <span style={{fontSize:11,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>PROJ TOTAL: <b style={{color:acc}}>{predTotal.toFixed(1)}</b></span>
+    </div>
+  </div>;
+}
+function DailyPage(){
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState(null);
+  useEffect(()=>{
+    setLoading(true);setErr(null);
+    fetch("/api/daily").then(r=>r.json()).then(d=>{setData(d);setLoading(false);}).catch(e=>{setErr(e.message);setLoading(false);});
+  },[]);
+  if(loading)return <div style={{textAlign:"center",padding:60,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:18,letterSpacing:2}}>LOADING TODAY'S GAMES...</div>;
+  if(err)return <div style={{textAlign:"center",padding:60,color:C.copper,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16}}>{err}</div>;
+  if(!data?.games?.length)return <div style={{textAlign:"center",padding:60,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,letterSpacing:2}}>NO NBA GAMES TODAY</div>;
+  const dt=data.date?new Date(data.date).toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"}):"";
+  return <div>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+      <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.copper,letterSpacing:2}}>{dt.toUpperCase()}</div>
+      <div style={{padding:"5px 12px",borderRadius:20,background:C.card,border:"1px solid "+C.border,fontFamily:"'Barlow Condensed'",fontSize:12,color:C.muted,fontWeight:700}}>{data.games.length} GAME{data.games.length!==1?"S":""}</div>
+    </div>
+    {data.games.map(game=><DailyGameCard key={game.id} game={game}/>)}
+  </div>;
+}
+
 export default function App(){
   const [sport,setSport]=useState("nba");
-  const TABS=[{id:"nba",label:"NBA",accent:C.teal,sub:"5-model system - Elo - RAPTOR - Four Factors - ML/BPI - Monte Carlo"},{id:"nhl",label:"NHL",accent:C.ice,sub:"5-model system - Elo - Goalie - Special Teams - Corsi - Monte Carlo"},{id:"ncaam",label:"NCAAM",accent:C.amber,sub:"5-model system - KenPom - BPI - Four Factors - Tempo - Monte Carlo"}];
+  const TABS=[{id:"nba",label:"NBA",accent:C.teal,sub:"5-model system - Elo - RAPTOR - Four Factors - ML/BPI - Monte Carlo"},{id:"nhl",label:"NHL",accent:C.ice,sub:"5-model system - Elo - Goalie - Special Teams - Corsi - Monte Carlo"},{id:"ncaam",label:"NCAAM",accent:C.amber,sub:"5-model system - KenPom - BPI - Four Factors - Tempo - Monte Carlo"},{id:"daily",label:"DAILY",accent:C.copper,sub:"All today's NBA games with spread, moneyline, total & model picks"}];
   const ct=TABS.find(t=>t.id===sport);
   return <div style={{minHeight:"100vh",background:C.black,fontFamily:"'Barlow',sans-serif",color:C.white}}>
     <style>{STYLES}</style>
@@ -980,7 +1062,7 @@ export default function App(){
     </div>
     <div style={{background:"linear-gradient(90deg,"+ct.accent+"18,transparent)",borderBottom:"1px solid "+C.border,padding:"8px 16px"}}>
       <div style={{maxWidth:1040,margin:"0 auto",display:"flex",alignItems:"center",gap:10}}>
-        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:18,color:ct.accent,letterSpacing:2}}>{ct.label==="NBA"?"NBA MONEYLINE ANALYZER":ct.label==="NHL"?"NHL MONEYLINE ANALYZER":"NCAAM MONEYLINE ANALYZER"}</span>
+        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:18,color:ct.accent,letterSpacing:2}}>{ct.label==="NBA"?"NBA MONEYLINE ANALYZER":ct.label==="NHL"?"NHL MONEYLINE ANALYZER":ct.label==="NCAAM"?"NCAAM MONEYLINE ANALYZER":"NBA DAILY PICKS"}</span>
         <span style={{fontSize:11,color:C.muted}}>{ct.sub}</span>
       </div>
     </div>
@@ -988,6 +1070,7 @@ export default function App(){
       {sport==="nba"&&<NBAPage/>}
       {sport==="nhl"&&<NHLPage/>}
       {sport==="ncaam"&&<NCAAMPage/>}
+      {sport==="daily"&&<DailyPage/>}
       <div style={{fontSize:10,color:C.dim,textAlign:"center",padding:"16px 0 8px"}}>For informational and entertainment purposes only - Not financial advice - Gamble responsibly</div>
     </div>
   </div>;

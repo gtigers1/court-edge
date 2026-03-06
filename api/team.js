@@ -161,6 +161,14 @@ export default async function handler(req, res) {
         if (fta && fga) espnTeamStats.ftr = parseFloat(((fta/gp) / (fga/gp)).toFixed(3));
         if (ofgm && ofga && otpm) espnTeamStats.opp_efg_pct = parseFloat(((ofgm + 0.5*otpm) / ofga).toFixed(3));
         if (otov && ofga && ofta) espnTeamStats.opp_tov_rate = parseFloat((100 * otov / (ofga/gp + 0.44*(ofta/gp) + otov)).toFixed(1));
+        // Pace (possessions per game): try ESPN direct stat, fall back to four-factor estimate
+        const directPace = tStat("pace") ?? tStat("avgPossessions") ?? tStat("possessions");
+        if (directPace && directPace > 80 && directPace < 125) {
+          espnTeamStats.pace = parseFloat(directPace.toFixed(1));
+        } else if (fga && tov != null && fta && oreb != null && gp > 0) {
+          const est = (fga/gp) - oreb + tov + 0.44*(fta/gp);
+          if (est > 80 && est < 125) espnTeamStats.pace = parseFloat(est.toFixed(1));
+        }
       } else {
         const gf   = tStat("avgGoals") ?? tStat("goals");
         const ga   = tStat("goalsAgainst") ?? tStat("avgGoalsAgainst");
@@ -264,6 +272,7 @@ export default async function handler(req, res) {
         last10:     l10Cnt > 0 ? (l10wins + "-" + l10losses) : "5-5",
         last10_ppg: l10ppg != null ? parseFloat(l10ppg.toFixed(1)) : (espnTeamStats.ppg || schedPPG || 112),
         last10_opp: l10opp != null ? parseFloat(l10opp.toFixed(1)) : (espnTeamStats.opp || schedOPP || 112),
+        pace:    espnTeamStats.pace || null,
         rest:    daysSinceLastGame,
         elo:     Math.round(teamElo),
         espn_id: teamNumId,

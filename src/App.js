@@ -242,10 +242,17 @@ function nbaMdlMonteCarlo(h,a,N=10000){
   // Uses offensive + defensive ratings to project actual scores
   const hi=injPen(h.roster,0.11,0.055,0.01);
   const ai=injPen(a.roster,0.11,0.055,0.01);
-  const hOff=(h.ppg*0.60+(h.last10_ppg||h.ppg)*0.40)*(1-hi);
-  const aOff=(a.ppg*0.60+(a.last10_ppg||a.ppg)*0.40)*(1-ai);
-  const hDef=(a.opp*0.60+(a.last10_opp||a.opp)*0.40)*(1-ai*0.4);
-  const aDef=(h.opp*0.60+(h.last10_opp||h.opp)*0.40)*(1-hi*0.4);
+  // Use home/away splits when available (home team at home, away team on road)
+  const hPPG=h.home_ppg||h.ppg, aOPP=a.away_opp||a.opp;
+  const aPPG=a.away_ppg||a.ppg, hOPP=h.home_opp||h.opp;
+  // Pace adjustment: normalize scoring to expected game possessions
+  // Pacers (pace=108) vs Knicks (pace=95) -> gamePace=101.5, not each team's own pace
+  const hP=h.pace||99,aP=a.pace||99,gamePace=(hP+aP)/2;
+  const pa=(score,teamPace)=>(score/Math.max(teamPace,80))*gamePace;
+  const hOff=pa(hPPG*0.60+(h.last10_ppg||h.ppg)*0.40,hP)*(1-hi);
+  const aOff=pa(aPPG*0.60+(a.last10_ppg||a.ppg)*0.40,aP)*(1-ai);
+  const hDef=pa(aOPP*0.60+(a.last10_opp||a.opp)*0.40,aP)*(1-ai*0.4);
+  const aDef=pa(hOPP*0.60+(h.last10_opp||h.opp)*0.40,hP)*(1-hi*0.4);
   // Rest penalty: back-to-back (0 days) = -3pts, 1 day = -1.5pts, 2+ days = 0
   const restPen=d=>Math.max(0,(2-Math.min(d??2,2))*1.5);
   const hExp=(hOff*0.55+hDef*0.45)+1.6-restPen(h.rest);
@@ -257,7 +264,8 @@ function nbaMdlMonteCarlo(h,a,N=10000){
     const z2=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
     if(hExp+z1*sig>aExp+z2*sig)w++;}
   const restNote=(h.rest??2)<2||(a.rest??2)<2?`  Rest: H ${h.rest??2}d A ${a.rest??2}d`:"";
-  return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts${restNote}`};}
+  const paceNote=h.pace&&a.pace?`  Pace: ${gamePace.toFixed(0)}`:"";
+  return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts${restNote}${paceNote}`};}
 
 function nbaConsensus(ps,mkt){
   // NetRating gets most weight  -  it's the best single NBA predictor
@@ -276,7 +284,7 @@ function NBAPage(){
   const fetchOdds=async()=>{setOddsLoading(true);setOddsError("");setSharpAlert(null);try{const r=await fetch("/api/odds",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sport:"nba",homeTeam,awayTeam})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);if(d.homeML)setHomeOdds(d.homeML);if(d.awayML)setAwayOdds(d.awayML);if(d.homeSpread)setHomeSpread(d.homeSpread);if(d.total)setPostedTotal(d.total);if(d.sharpIndicator)setSharpAlert(d.sharpIndicator);if(d.gameTime)setGameTime(d.gameTime);}catch(e){setOddsError(e.message);}setOddsLoading(false);};
   const resetAll=()=>{setAwayTeam("");setHomeTeam("");setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");};
   const cyclePlayer=(side,name)=>{const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];if(!g)return;s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});};
-  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const pyth=nbaMdlPythagorean(homeData,awayData),net=nbaMdlNetRating(homeData,awayData),ff=nbaMdlFourFactors(homeData,awayData),star=nbaMdlStarPower(homeData,awayData),mc=nbaMdlMonteCarlo(homeData,awayData);const mkt=devigged(homeOdds,awayOdds);const hElo=homeData.elo||1500,aElo=awayData.elo||1500;const eloProb=1/(1+Math.pow(10,(aElo-hElo)/400));const h2hG=(homeData.games||[]).filter(g=>g.opp===awayData.espn_id);const h2hW=h2hG.filter(g=>g.win).length;const h2hProb=h2hG.length>=2?h2hW/h2hG.length:null;const divGame=!!(NBA_DIV[homeTeam]&&NBA_DIV[homeTeam]===NBA_DIV[awayTeam]);const altBoost=ALTITUDE_HOME[homeTeam]||0;const hTZ=TZ_OFF[NBA_TZ[homeTeam]]??1.5,aTZ=TZ_OFF[NBA_TZ[awayTeam]]??1.5;const tzAdj=Math.max(-0.02,Math.min(0.04,(hTZ-aTZ)*0.010));let cons=nbaConsensus([pyth.homeProb,net.homeProb,ff.homeProb,star.homeProb,mc.homeProb],mkt);if(altBoost)cons=Math.min(0.97,Math.max(0.03,cons+altBoost));if(divGame)cons=cons*0.92+0.5*0.08;cons=Math.min(0.97,Math.max(0.03,cons+tzAdj));if(h2hProb!==null)cons=cons*0.94+h2hProb*0.06;cons=Math.min(0.97,Math.max(0.03,cons*0.90+eloProb*0.10));const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);const modelSpread=(hExpN-aExpN).toFixed(1);const modelTotal=(hExpN+aExpN).toFixed(1);setResults({pyth,net,ff,star,mc,mkt,cons,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread,modelTotal});setTab("results");setAnalyzing(false);},50);};
+  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const pyth=nbaMdlPythagorean(homeData,awayData),net=nbaMdlNetRating(homeData,awayData),ff=nbaMdlFourFactors(homeData,awayData),star=nbaMdlStarPower(homeData,awayData),mc=nbaMdlMonteCarlo(homeData,awayData);const mkt=devigged(homeOdds,awayOdds);const hElo=homeData.elo||1500,aElo=awayData.elo||1500;const eloProb=1/(1+Math.pow(10,(aElo-hElo)/400));const h2hG=(homeData.games||[]).filter(g=>g.opp===awayData.espn_id);const h2hW=h2hG.filter(g=>g.win).length;const h2hProb=h2hG.length>=2?h2hW/h2hG.length:null;const divGame=!!(NBA_DIV[homeTeam]&&NBA_DIV[homeTeam]===NBA_DIV[awayTeam]);const altBoost=ALTITUDE_HOME[homeTeam]||0;const hTZ=TZ_OFF[NBA_TZ[homeTeam]]??1.5,aTZ=TZ_OFF[NBA_TZ[awayTeam]]??1.5;const tzAdj=Math.max(-0.02,Math.min(0.04,(hTZ-aTZ)*0.010));let cons=nbaConsensus([pyth.homeProb,net.homeProb,ff.homeProb,star.homeProb,mc.homeProb],mkt);if(altBoost)cons=Math.min(0.97,Math.max(0.03,cons+altBoost));if(divGame)cons=cons*0.92+0.5*0.08;cons=Math.min(0.97,Math.max(0.03,cons+tzAdj));if(h2hProb!==null)cons=cons*0.94+h2hProb*0.06;cons=Math.min(0.97,Math.max(0.03,cons*0.90+eloProb*0.10));const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);const modelSpread=(hExpN-aExpN).toFixed(1);const rawTotal=hExpN+aExpN;const ptN=parseFloat(postedTotal);const modelTotal=(!isNaN(ptN)?rawTotal*0.70+ptN*0.30:rawTotal).toFixed(1);setResults({pyth,net,ff,star,mc,mkt,cons,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread,modelTotal});setTab("results");setAnalyzing(false);},50);};
   const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
   const bothLoaded=awayData&&homeData;const awayAbbr=NBA_ABBR[awayTeam]||"AWY";const homeAbbr=NBA_ABBR[homeTeam]||"HME";
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
@@ -324,11 +332,13 @@ function NBAPage(){
 
 // Shared Best Bets summary - top 3 most confident bets with star ratings
 // sigma = std dev of game margin/total (Normal approximation)
-// NBA: sqrt(2)*11.5 = 16.3 | NHL: ~2.4 (Poisson total goals) | NCAAM: sqrt(2)*10 = 14.1
+// Spread sigma: sqrt(2)*11.5=16.3 | Total sigma: higher due to pace correlation (~20 NBA, ~18 NCAAM)
+// NHL uses Poisson model: spread~2.4, total~1.8
 function BestBets({results,awayTeam,homeTeam,homeSpread,postedTotal,sport,accent}){
   if(!results||results.cons==null)return null;
   const cons=results.cons,ms=parseFloat(results.modelSpread),mt=parseFloat(results.modelTotal);
-  const sigma=sport==="nhl"?2.4:sport==="ncaam"?14.1:16.3;
+  const sigmaSpread=sport==="nhl"?2.4:sport==="ncaam"?14.1:16.3;
+  const sigmaTotal=sport==="nhl"?1.8:sport==="ncaam"?18:20;
   const ac=accent||C.copper;
   const bets=[];
   // ML - always available; show the favored side
@@ -337,14 +347,14 @@ function BestBets({results,awayTeam,homeTeam,homeSpread,postedTotal,sport,accent
   // Spread - if user entered spread and model has an expected margin
   const ps=parseFloat(homeSpread);
   if(!isNaN(ps)&&!isNaN(ms)){
-    const ph=normalCDF((ms+ps)/sigma);
+    const ph=normalCDF((ms+ps)/sigmaSpread);
     if(ph>=0.5)bets.push({label:homeTeam+" "+homeSpread,conf:ph});
     else{const al=(-ps)>=0?"+"+(-ps).toFixed(1):(-ps).toFixed(1);bets.push({label:awayTeam+" "+al,conf:1-ph});}
   }
   // Total - if user entered total and model has an expected total
   const pt=parseFloat(postedTotal);
   if(!isNaN(pt)&&!isNaN(mt)){
-    const po=normalCDF((mt-pt)/sigma);
+    const po=normalCDF((mt-pt)/sigmaTotal);
     if(po>=0.5)bets.push({label:"Over "+postedTotal,conf:po});
     else bets.push({label:"Under "+postedTotal,conf:1-po});
   }

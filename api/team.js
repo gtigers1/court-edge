@@ -241,19 +241,10 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "ESPN roster empty for " + team });
     }
 
-    // Step 4: NBA fast path - build response directly from ESPN + NBA.com data (no Haiku/Sonnet)
-    // ESPN provides all team stats; NBA.com provides all player stats; schedule provides L10/rest/Elo
+    // Step 4: NBA response - team stats from ESPN, player stats from NBA.com (or Haiku fallback)
     if (sport === "nba") {
-      const roster = playerNames.map(p => {
-        const ppg = p.ppg != null ? parseFloat(p.ppg.toFixed(1)) : 5.0;
-        const rpg = p.rpg != null ? parseFloat(p.rpg.toFixed(1)) : 2.0;
-        const apg = p.apg != null ? parseFloat(p.apg.toFixed(1)) : 1.0;
-        const per = parseFloat((ppg*0.9 + rpg*0.3 + apg*0.5).toFixed(1));
-        const role = ppg > 20 ? "STAR" : ppg > 11 ? "KEY" : "ROLE";
-        const status = injuryMap[normKey(p.name)] || "PLAYING";
-        return { name: p.name, ppg, rpg, apg, per, role, status };
-      });
-      const result = {
+      // Base result: all team-level fields from ESPN + schedule (no AI needed)
+      const baseResult = {
         wins,
         losses,
         ppg:          espnTeamStats.ppg          || 112,
@@ -273,11 +264,61 @@ export default async function handler(req, res) {
         elo:     Math.round(teamElo),
         espn_id: teamNumId,
         games:   teamGames,
-        roster
       };
-      if (hSplit) { result.home_ppg = parseFloat(hSplit.sf.toFixed(1)); result.home_opp = parseFloat(hSplit.ag.toFixed(1)); }
-      if (aSplit) { result.away_ppg = parseFloat(aSplit.sf.toFixed(1)); result.away_opp = parseFloat(aSplit.ag.toFixed(1)); }
-      return res.status(200).json(result);
+      if (hSplit) { baseResult.home_ppg = parseFloat(hSplit.sf.toFixed(1)); baseResult.home_opp = parseFloat(hSplit.ag.toFixed(1)); }
+      if (aSplit) { baseResult.away_ppg = parseFloat(aSplit.sf.toFixed(1)); baseResult.away_opp = parseFloat(aSplit.ag.toFixed(1)); }
+
+      const buildRoster = (players) => players.map(p => {
+        const ppg = p.ppg != null ? parseFloat(p.ppg.toFixed(1)) : 5.0;
+        const rpg = p.rpg != null ? parseFloat(p.rpg.toFixed(1)) : 2.0;
+        const apg = p.apg != null ? parseFloat(p.apg.toFixed(1)) : 1.0;
+        const per = parseFloat((ppg*0.9 + rpg*0.3 + apg*0.5).toFixed(1));
+        const role = ppg > 20 ? "STAR" : ppg > 11 ? "KEY" : "ROLE";
+        const status = injuryMap[normKey(p.name || "")] || "PLAYING";
+        return { name: p.name, ppg, rpg, apg, per, role, status };
+      });
+
+      // Fast path: NBA.com returned stats for most players - no AI needed
+      if (Object.keys(nbaStatsMap).length >= 8) {
+        return res.status(200).json({ ...baseResult, roster: buildRoster(playerNames) });
+      }
+
+      // Fallback: NBA.com blocked - use Haiku to find player stats, Sonnet to format roster only
+      // Team stats already captured above from ESPN, so Sonnet only handles the roster array
+      const nameList = playerNames.map(p => p.name).join(", ");
+      const playerSearchResp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1000,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [{ role: "user", content: team + " 2025-26 NBA player stats per game " + monthYear + ": " + nameList + ". Find PPG RPG APG for each player this season." }]
+        })
+      });
+      const psd = await playerSearchResp.json();
+      const playerSearchText = (psd.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 1500);
+
+      // Sonnet formats roster only (much faster than full team JSON - no team stats needed)
+      const rosterSchema = '[{"name":"exact name from list","ppg":20.0,"rpg":5.0,"apg":3.0}]';
+      const fmt = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1200,
+          system: "Output only a raw JSON array. No markdown, no explanation, no code fences.",
+          messages: [{ role: "user", content: "Extract per-game stats for ALL " + team + " NBA players from the search results below.\n\nPlayer list (use EXACT names, include ALL):\n" + nameList + "\n\nStats data:\n" + playerSearchText + "\n\nSchema:\n" + rosterSchema + "\n\nInclude EVERY player in the list. Use real stats from the data; if not found use 5/2/1 as placeholder." }]
+        })
+      });
+      const fd = await fmt.json();
+      const rawRoster = (fd.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+      let rosterArr = null;
+      try { rosterArr = JSON.parse(rawRoster); } catch(_) {}
+      if (!rosterArr) { try { rosterArr = JSON.parse(rawRoster.replace(/^```json\s*/i,"").replace(/\s*```$/,"")); } catch(_) {} }
+      if (!rosterArr) { try { const i=rawRoster.indexOf("["),j=rawRoster.lastIndexOf("]"); if(i>=0&&j>i) rosterArr=JSON.parse(rawRoster.slice(i,j+1)); } catch(_) {} }
+
+      return res.status(200).json({ ...baseResult, roster: buildRoster(rosterArr || playerNames) });
     }
 
     // Step 5: NHL path - Haiku search for goalie/context, then Sonnet to format roster

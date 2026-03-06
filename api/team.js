@@ -83,6 +83,7 @@ export default async function handler(req, res) {
     if (l10Cnt >= 3) { l10ppg = l10SF / l10Cnt; l10opp = l10AG / l10Cnt; }
 
     let hSF = 0, hAG = 0, hCnt = 0, aSF = 0, aAG = 0, aCnt = 0;
+    let sSF = 0, sAG = 0, sCnt = 0; // full-season PPG/OPP from real game scores
     const ELO_K = 30;
     for (const ev of completed) {
       const comp = ev.competitions?.[0];
@@ -100,9 +101,12 @@ export default async function handler(req, res) {
       const marginMult = Math.max(0.5, Math.log(margin + 1) / Math.log(15));
       teamElo += ELO_K * marginMult * (win - expected);
       if (isHome) { hSF += s; hAG += t; hCnt++; } else { aSF += s; aAG += t; aCnt++; }
+      sSF += s; sAG += t; sCnt++;
     }
     if (hCnt >= 8) hSplit = { sf: hSF / hCnt, ag: hAG / hCnt };
     if (aCnt >= 8) aSplit = { sf: aSF / aCnt, ag: aAG / aCnt };
+    const schedPPG = sCnt >= 10 ? parseFloat((sSF / sCnt).toFixed(1)) : null;
+    const schedOPP = sCnt >= 10 ? parseFloat((sAG / sCnt).toFixed(1)) : null;
 
     // Shared normalization helper
     const normKey = s => (s||"").toLowerCase().replace(/[^a-z]/g,"");
@@ -247,8 +251,8 @@ export default async function handler(req, res) {
       const baseResult = {
         wins,
         losses,
-        ppg:          espnTeamStats.ppg          || 112,
-        opp:          espnTeamStats.opp          || 112,
+        ppg:          espnTeamStats.ppg          || schedPPG || 112,
+        opp:          espnTeamStats.opp          || schedOPP || 112,
         efg_pct:      espnTeamStats.efg_pct      || 0.52,
         tov_rate:     espnTeamStats.tov_rate     || 13.5,
         oreb_pct:     espnTeamStats.oreb_pct     || 0.26,
@@ -258,8 +262,8 @@ export default async function handler(req, res) {
         opp_oreb_pct: 0.26,
         opp_ftr:      0.22,
         last10:     l10Cnt > 0 ? (l10wins + "-" + l10losses) : "5-5",
-        last10_ppg: l10ppg != null ? parseFloat(l10ppg.toFixed(1)) : (espnTeamStats.ppg || 112),
-        last10_opp: l10opp != null ? parseFloat(l10opp.toFixed(1)) : (espnTeamStats.opp || 112),
+        last10_ppg: l10ppg != null ? parseFloat(l10ppg.toFixed(1)) : (espnTeamStats.ppg || schedPPG || 112),
+        last10_opp: l10opp != null ? parseFloat(l10opp.toFixed(1)) : (espnTeamStats.opp || schedOPP || 112),
         rest:    daysSinceLastGame,
         elo:     Math.round(teamElo),
         espn_id: teamNumId,

@@ -14,28 +14,13 @@ export default async function handler(req, res) {
   const dateStr = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   const sportName = sport === "nhl" ? "NHL hockey" : sport === "ncaam" ? "college basketball" : "NBA basketball";
 
+  // Safe default returned if search/parse fails — model still runs with zero adjustments
+  const safeDefault = { totalAdjustment:0, homeMLAdjustment:0, spreadAdjustment:0, injuryAlerts:[], situationalNotes:[], refNotes:[] };
+
   const schema = '{"totalAdjustment":0,"homeMLAdjustment":0,"spreadAdjustment":0,"injuryAlerts":[],"situationalNotes":[],"refNotes":[]}';
 
-  const prompt = `Search for the ${awayTeam} vs ${homeTeam} ${sportName} game today (${dateStr}). Find:
-
-1. REFEREE CREW: Who are the assigned referees for this game? Look up their historical tendencies - do they call more or fewer fouls than average? High-foul crews lead to more free throws and higher-scoring games. NBA average game total is ~224 pts.
-
-2. INJURY/LINEUP NEWS: Any players listed as OUT, doubtful, or questionable for tonight? Any last-minute lineup changes or load management decisions announced today?
-
-3. SITUATIONAL FACTORS: Is either team on a back-to-back? Any revenge game narrative? Playoff seeding implications? Recent travel? Home vs road record differences?
-
-Based on this research, return ONLY this JSON schema filled with real data:
-${schema}
-
-Rules:
-- totalAdjustment: points to add to model total (positive=over, negative=under). Clamp to -5/+5. Use 0 if uncertain.
-- homeMLAdjustment: probability to add to ${homeTeam} win chance (positive=home favored more). Clamp to -0.05/+0.05. Use 0 if uncertain.
-- spreadAdjustment: points to add to ${homeTeam} spread (positive=home covers better). Clamp to -3/+3. Use 0 if uncertain.
-- injuryAlerts: up to 5 short strings describing confirmed injuries/lineup news found today.
-- situationalNotes: up to 5 short strings about back-to-backs, revenge games, seeding stakes.
-- refNotes: up to 3 short strings about referee crew and their scoring tendencies.
-
-No markdown. No code fences. No explanation. Return only the JSON object.`;
+  // Compact single-paragraph prompt — easier for search models to return clean JSON
+  const prompt = `Search for tonight's ${awayTeam} @ ${homeTeam} ${sportName} game on ${dateStr}. Research: (1) referee crew assigned to this game and whether they average more or fewer fouls/points than league average, (2) any player injury or lineup news announced today (OUT/doubtful/questionable), (3) situational factors like back-to-back games, playoff seeding stakes, or revenge games. Return ONLY this JSON object with real data — no markdown, no fences, no extra text: ${schema} Rules: totalAdjustment = pts to add to game total (-5 to +5, positive means over). homeMLAdjustment = add to ${homeTeam} win probability (-0.05 to +0.05). spreadAdjustment = add to ${homeTeam} spread (-3 to +3). injuryAlerts = array of short injury strings. situationalNotes = array of short situational strings. refNotes = array of short referee tendency strings. Use 0 / empty arrays if data not found.`;
 
   let raw = "";
   try {
@@ -45,11 +30,11 @@ No markdown. No code fences. No explanation. Return only the JSON object.`;
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${pplxKey}` },
         body: JSON.stringify({
           model: "sonar-pro",
+          max_tokens: 800,
           messages: [
-            { role: "system", content: "You are a sports betting research assistant. Search the web for current, real information about tonight's game and return only a valid JSON object. No markdown, no code fences, no explanation." },
+            { role: "system", content: "You are a sports betting data API. Always respond with a single valid JSON object. No markdown, no code fences, no explanation." },
             { role: "user", content: prompt }
-          ],
-          response_format: { type: "json_object" }
+          ]
         })
       });
       const d = await r.json();
@@ -80,11 +65,17 @@ No markdown. No code fences. No explanation. Return only the JSON object.`;
       raw = (fd.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
     }
 
+    // Progressive JSON extraction
     let parsed = null;
     try { parsed = JSON.parse(raw); } catch(_) {}
-    if (!parsed) { try { parsed = JSON.parse(raw.replace(/^```json\s*/i,"").replace(/\s*```$/,"")); } catch(_) {} }
-    if (!parsed) { try { const i=raw.indexOf("{"),j=raw.lastIndexOf("}"); if(i>=0&&j>i) parsed=JSON.parse(raw.slice(i,j+1)); } catch(_) {} }
-    if (!parsed) return res.status(500).json({ error: "Parse failed", raw: raw.slice(0, 200) });
+    if (!parsed) { try { parsed = JSON.parse(raw.replace(/^```json\s*/i,"").replace(/\s*```$/,"").trim()); } catch(_) {} }
+    if (!parsed) { try { const i=raw.indexOf("{"), j=raw.lastIndexOf("}"); if(i>=0&&j>i) parsed=JSON.parse(raw.slice(i,j+1)); } catch(_) {} }
+
+    // If still unparseable, return safe defaults rather than blocking the user
+    if (!parsed) {
+      const note = raw.length > 0 ? "Context search returned non-JSON response" : "Context search returned empty response";
+      return res.status(200).json({ ...safeDefault, situationalNotes: [note] });
+    }
 
     // Clamp adjustments to safe bounds
     const clamp = (v, mn, mx) => Math.max(mn, Math.min(mx, parseFloat(v) || 0));
@@ -97,6 +88,7 @@ No markdown. No code fences. No explanation. Return only the JSON object.`;
 
     return res.status(200).json(parsed);
   } catch(err) {
-    return res.status(500).json({ error: err.message });
+    // Never block the user — return safe defaults with the error as a note
+    return res.status(200).json({ ...safeDefault, situationalNotes: ["Context fetch error: " + err.message] });
   }
 }

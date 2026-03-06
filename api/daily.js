@@ -36,7 +36,15 @@ export default async function handler(req, res) {
     const events = sb.events || [];
     if (events.length === 0) return res.status(200).json({ games: [], date: new Date().toISOString() });
 
-    // Build FanDuel odds map keyed by lowercase home team name
+    // Build FanDuel odds map - store under multiple name variants to handle
+    // ESPN vs Odds API mismatches (e.g. "LA Clippers" vs "Los Angeles Clippers")
+    const nameKeys = n => {
+      const lo = n.toLowerCase();
+      const alts = [lo];
+      if (lo.startsWith('los angeles ')) alts.push('la ' + lo.slice(12));
+      if (lo.startsWith('la '))          alts.push('los angeles ' + lo.slice(3));
+      return alts;
+    };
     const fdMap = {};
     if (Array.isArray(fdRaw)) {
       for (const g of fdRaw) {
@@ -50,7 +58,8 @@ export default async function handler(req, res) {
         const awayML    = h2h?.outcomes?.find(o => o.name === at)?.price ?? null;
         const spread    = spreads?.outcomes?.find(o => o.name === ht)?.point ?? null;
         const overUnder = totals?.outcomes?.find(o => o.name === "Over")?.point ?? null;
-        fdMap[ht.toLowerCase()] = { spread, overUnder, homeML, awayML, source: "fanduel" };
+        const entry = { spread, overUnder, homeML, awayML, source: "fanduel" };
+        for (const key of nameKeys(ht)) fdMap[key] = entry;
       }
     }
 

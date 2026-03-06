@@ -962,18 +962,25 @@ function DailyGameCard({game}){
   const {mlPick,spreadPick,totalPick,homeWinProb,predMargin,predTotal}=prediction;
   const fml=v=>v==null?"-":v>0?("+"+v):String(v);
   const fspread=v=>v==null?"-":v===0?"PK":v>0?("+"+v):String(v);
-  const homeSpreadStr=fspread(spread);
-  const awaySpreadStr=fspread(spread!=null?-spread:null);
   const gameTime=time?new Date(time).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZoneName:"short"}):"";
   const isLive=status==="in";
   const isFinal=status==="post";
   const acc=C.copper;
+  // When ESPN drops odds (live/final games), fall back to model projections
+  const noOdds=spread==null&&overUnder==null&&homeML==null&&awayML==null;
+  const dHomeSpread=spread!=null?fspread(spread):fspread(parseFloat((-predMargin).toFixed(1)));
+  const dAwaySpread=spread!=null?fspread(-spread):fspread(parseFloat(predMargin.toFixed(1)));
+  const dHomeML=homeML!=null?fml(homeML):probToAmerican(homeWinProb);
+  const dAwayML=awayML!=null?fml(awayML):probToAmerican(1-homeWinProb);
+  const dOverTotal=overUnder!=null?"O "+overUnder:"O "+predTotal.toFixed(1);
+  const dUnderTotal=overUnder!=null?"U "+overUnder:"U "+predTotal.toFixed(1);
   const pickBox=on=>({flex:1,textAlign:"center",padding:"12px 8px",background:on?acc+"22":"transparent",borderLeft:"1px solid "+C.border,borderBottom:on?"2px solid "+acc:"2px solid transparent",transition:"all .2s"});
   const pickLabel=on=>on?<div style={{fontSize:8,color:acc,fontFamily:"'Barlow Condensed'",fontWeight:800,letterSpacing:1,marginTop:2}}>MODEL</div>:null;
   return <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:12}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 14px",borderBottom:"1px solid "+C.border,background:C.dark}}>
       <span style={{fontFamily:"'Barlow Condensed'",fontSize:12,color:C.muted,fontWeight:700,letterSpacing:1}}>{gameTime}</span>
-      <div style={{display:"flex",gap:6}}>
+      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        {noOdds&&<span style={{fontSize:9,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1,background:C.dim,borderRadius:3,padding:"1px 6px"}}>PROJ ODDS</span>}
         {isLive&&<span style={{background:C.copper+"33",border:"1px solid "+C.copper+"66",borderRadius:4,padding:"2px 8px",fontSize:10,color:C.copper,fontFamily:"'Barlow Condensed'",fontWeight:800,letterSpacing:1}}>LIVE - {statusDetail}</span>}
         {isFinal&&<span style={{background:C.teal+"22",border:"1px solid "+C.teal+"44",borderRadius:4,padding:"2px 8px",fontSize:10,color:C.teal,fontFamily:"'Barlow Condensed'",fontWeight:800,letterSpacing:1}}>FINAL</span>}
         {!isLive&&!isFinal&&<span style={{background:C.dim,borderRadius:4,padding:"2px 8px",fontSize:10,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1}}>SCHEDULED</span>}
@@ -992,9 +999,9 @@ function DailyGameCard({game}){
         </div>
         {(isLive||isFinal)&&awayTeam.score!=null&&<span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:24,color:C.white}}>{awayTeam.score}</span>}
       </div>
-      <div style={pickBox(spreadPick==="away")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:spreadPick==="away"?acc:C.white}}>{awaySpreadStr}</div>{pickLabel(spreadPick==="away")}</div>
-      <div style={pickBox(mlPick==="away")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:mlPick==="away"?acc:C.white}}>{fml(awayML)}</div>{pickLabel(mlPick==="away")}</div>
-      <div style={pickBox(totalPick==="over")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:totalPick==="over"?acc:C.white}}>{overUnder!=null?"O "+overUnder:"-"}</div>{pickLabel(totalPick==="over")}</div>
+      <div style={pickBox(spreadPick==="away")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:spreadPick==="away"?acc:C.white}}>{dAwaySpread}</div>{pickLabel(spreadPick==="away")}</div>
+      <div style={pickBox(mlPick==="away")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:mlPick==="away"?acc:C.white}}>{dAwayML}</div>{pickLabel(mlPick==="away")}</div>
+      <div style={pickBox(totalPick==="over")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:totalPick==="over"?acc:C.white}}>{dOverTotal}</div>{pickLabel(totalPick==="over")}</div>
     </div>
     <div style={{display:"flex",alignItems:"stretch"}}>
       <div style={{flex:2.5,display:"flex",alignItems:"center",gap:10,padding:"12px 14px"}}>
@@ -1005,9 +1012,9 @@ function DailyGameCard({game}){
         </div>
         {(isLive||isFinal)&&homeTeam.score!=null&&<span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:24,color:C.white}}>{homeTeam.score}</span>}
       </div>
-      <div style={pickBox(spreadPick==="home")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:spreadPick==="home"?acc:C.white}}>{homeSpreadStr}</div>{pickLabel(spreadPick==="home")}</div>
-      <div style={pickBox(mlPick==="home")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:mlPick==="home"?acc:C.white}}>{fml(homeML)}</div>{pickLabel(mlPick==="home")}</div>
-      <div style={pickBox(totalPick==="under")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:totalPick==="under"?acc:C.white}}>{overUnder!=null?"U "+overUnder:"-"}</div>{pickLabel(totalPick==="under")}</div>
+      <div style={pickBox(spreadPick==="home")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:spreadPick==="home"?acc:C.white}}>{dHomeSpread}</div>{pickLabel(spreadPick==="home")}</div>
+      <div style={pickBox(mlPick==="home")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:mlPick==="home"?acc:C.white}}>{dHomeML}</div>{pickLabel(mlPick==="home")}</div>
+      <div style={pickBox(totalPick==="under")}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:17,color:totalPick==="under"?acc:C.white}}>{dUnderTotal}</div>{pickLabel(totalPick==="under")}</div>
     </div>
     <div style={{borderTop:"1px solid "+C.border,padding:"8px 14px",display:"flex",gap:20,flexWrap:"wrap",background:C.dark}}>
       <span style={{fontSize:11,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700}}>MODEL: <b style={{color:C.white}}>{Math.round(homeWinProb*100)}% {homeTeam.abbr}</b></span>

@@ -197,7 +197,7 @@ function nbaMdlNetRating(h,a){
   const adjDiff=(hBlend-aBlend)+3.2-(hi-ai)*18;
   // Scale: 1pt = 0.027, logit calibrated to NBA range
   const p=logistic(adjDiff*0.11);
-  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hNet:hBlend.toFixed(1),aNet:aBlend.toFixed(1),detail:`H Net ${hBlend>0?"+":""}${hBlend.toFixed(1)}  A Net ${aBlend>0?"+":""}${aBlend.toFixed(1)}  Diff: ${adjDiff.toFixed(1)}`};}
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hNet:hBlend.toFixed(1),aNet:aBlend.toFixed(1),adjDiff,detail:`H Net ${hBlend>0?"+":""}${hBlend.toFixed(1)}  A Net ${aBlend>0?"+":""}${aBlend.toFixed(1)}  Diff: ${adjDiff.toFixed(1)}`};}
 
 function nbaMdlFourFactors(h,a){
   // Four Factors: eFG% 40%, TOV% 25%, OREB% 20%, FTR 15%
@@ -287,7 +287,8 @@ function NBAPage(){
   const resetAll=()=>{setAwayTeam("");setHomeTeam("");setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");setContextData(null);setContextError("");};
   const fetchContext=async()=>{if(!homeTeam||!awayTeam)return;setContextLoading(true);setContextError("");try{const r=await fetch("/api/context",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({homeTeam,awayTeam,sport:"nba"})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);setContextData(d);}catch(e){setContextError(e.message);}setContextLoading(false);};
   const cyclePlayer=(side,name)=>{const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];if(!g)return;s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});};
-  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const pyth=nbaMdlPythagorean(homeData,awayData),net=nbaMdlNetRating(homeData,awayData),ff=nbaMdlFourFactors(homeData,awayData),star=nbaMdlStarPower(homeData,awayData),mc=nbaMdlMonteCarlo(homeData,awayData);const mkt=devigged(homeOdds,awayOdds);const hElo=homeData.elo||1500,aElo=awayData.elo||1500;const eloProb=1/(1+Math.pow(10,(aElo-hElo)/400));const h2hG=(homeData.games||[]).filter(g=>g.opp===awayData.espn_id);const h2hW=h2hG.filter(g=>g.win).length;const h2hProb=h2hG.length>=2?h2hW/h2hG.length:null;const divGame=!!(NBA_DIV[homeTeam]&&NBA_DIV[homeTeam]===NBA_DIV[awayTeam]);const altBoost=ALTITUDE_HOME[homeTeam]||0;const hTZ=TZ_OFF[NBA_TZ[homeTeam]]??1.5,aTZ=TZ_OFF[NBA_TZ[awayTeam]]??1.5;const tzAdj=Math.max(-0.02,Math.min(0.04,(hTZ-aTZ)*0.010));let cons=nbaConsensus([pyth.homeProb,net.homeProb,ff.homeProb,star.homeProb,mc.homeProb],mkt);if(altBoost)cons=Math.min(0.97,Math.max(0.03,cons+altBoost));if(divGame)cons=cons*0.92+0.5*0.08;cons=Math.min(0.97,Math.max(0.03,cons+tzAdj));if(h2hProb!==null)cons=cons*0.94+h2hProb*0.06;cons=Math.min(0.97,Math.max(0.03,cons*0.90+eloProb*0.10));const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);const modelSpread=(hExpN-aExpN).toFixed(1);const rawTotal=hExpN+aExpN;const ptN=parseFloat(postedTotal);
+  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const pyth=nbaMdlPythagorean(homeData,awayData),net=nbaMdlNetRating(homeData,awayData),ff=nbaMdlFourFactors(homeData,awayData),star=nbaMdlStarPower(homeData,awayData),mc=nbaMdlMonteCarlo(homeData,awayData);const mkt=devigged(homeOdds,awayOdds);const hElo=homeData.elo||1500,aElo=awayData.elo||1500;const eloProb=1/(1+Math.pow(10,(aElo-hElo)/400));const h2hG=(homeData.games||[]).filter(g=>g.opp===awayData.espn_id);const h2hW=h2hG.filter(g=>g.win).length;const h2hProb=h2hG.length>=2?h2hW/h2hG.length:null;const divGame=!!(NBA_DIV[homeTeam]&&NBA_DIV[homeTeam]===NBA_DIV[awayTeam]);const altBoost=ALTITUDE_HOME[homeTeam]||0;const hTZ=TZ_OFF[NBA_TZ[homeTeam]]??1.5,aTZ=TZ_OFF[NBA_TZ[awayTeam]]??1.5;const tzAdj=Math.max(-0.02,Math.min(0.04,(hTZ-aTZ)*0.010));let cons=nbaConsensus([pyth.homeProb,net.homeProb,ff.homeProb,star.homeProb,mc.homeProb],mkt);if(altBoost)cons=Math.min(0.97,Math.max(0.03,cons+altBoost));if(divGame)cons=cons*0.92+0.5*0.08;cons=Math.min(0.97,Math.max(0.03,cons+tzAdj));if(h2hProb!==null)cons=cons*0.94+h2hProb*0.06;cons=Math.min(0.97,Math.max(0.03,cons*0.90+eloProb*0.10));const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);const mcSpread=hExpN-aExpN;const nrSpread=net.adjDiff; // NR spread: robust to absolute PPG calibration errors (relative diff cancels bias)
+        const blendedSpread=mcSpread*0.50+nrSpread*0.50;const modelSpread=blendedSpread.toFixed(1);const rawTotal=hExpN+aExpN;const ptN=parseFloat(postedTotal);
         // Adaptive blend: when model is far below market (likely stale PPG data), trust market more
         // Gap 0-8 pts → 50/50 | Gap 8-15 pts → 30/70 | Gap 15+ pts → 15/85
         const totalGap=!isNaN(ptN)?ptN-rawTotal:0;
@@ -359,12 +360,14 @@ function BestBets({results,awayTeam,homeTeam,homeSpread,postedTotal,sport,accent
   // ML - always available; show the favored side
   if(cons>=0.5)bets.push({label:homeTeam+" ML",conf:cons});
   else bets.push({label:awayTeam+" ML",conf:1-cons});
-  // Spread - if user entered spread and model has an expected margin
+  // Spread - only recommend if model disagrees with line by ≥2.5 pts (edge threshold prevents betting noise)
   const ps=parseFloat(homeSpread);
-  if(!isNaN(ps)&&!isNaN(ms)){
+  if(!isNaN(ps)&&!isNaN(ms)&&Math.abs(ms+ps)>=2.5){
     const ph=normalCDF((ms+ps)/sigmaSpread);
-    if(ph>=0.5)bets.push({label:homeTeam+" "+homeSpread,conf:ph});
-    else{const al=(-ps)>=0?"+"+(-ps).toFixed(1):(-ps).toFixed(1);bets.push({label:awayTeam+" "+al,conf:1-ph});}
+    // Cap spread confidence at 57% — best ATS models hit 54-56%, avoid false precision
+    const cappedPh=Math.min(0.57,Math.max(0.43,ph));
+    if(cappedPh>=0.5)bets.push({label:homeTeam+" "+homeSpread,conf:cappedPh});
+    else{const al=(-ps)>=0?"+"+(-ps).toFixed(1):(-ps).toFixed(1);bets.push({label:awayTeam+" "+al,conf:1-cappedPh});}
   }
   // Total - if user entered total and model has an expected total
   // Dampen confidence when model-market gap is large (model likely has stale data)

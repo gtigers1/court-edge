@@ -288,11 +288,13 @@ function nbaMdlTotal(h,a){
   const restPen=d=>Math.max(0,(2-Math.min(d??2,2))*1.5);
   const hFinalRaw=(hProj*0.60+hProjR*0.40)*(1-hi)+1.6-restPen(h.rest);
   const aFinalRaw=(aProj*0.60+aProjR*0.40)*(1-ai)-restPen(a.rest);
-  // Guard against NaN/Infinity before .toFixed() — NaN.toFixed() is fine but Infinity.toFixed() throws
-  const hFinal=isFinite(hFinalRaw)&&!isNaN(hFinalRaw)?hFinalRaw:60;
-  const aFinal=isFinite(aFinalRaw)&&!isNaN(aFinalRaw)?aFinalRaw:58;
+  // Guard against NaN/Infinity before .toFixed() — NaN.toFixed() is fine but Infinity.toFixed() throws RangeError
+  const safe=x=>(isFinite(x)&&!isNaN(x))?x:null;
+  const hFinal=safe(hFinalRaw)??60;
+  const aFinal=safe(aFinalRaw)??58;
+  const safeGP=safe(gamePace)??99;
   return{rawTotal:hFinal+aFinal,hProj:hFinal.toFixed(1),aProj:aFinal.toFixed(1),
-    detail:`Pace-adj: ${(hFinal+aFinal).toFixed(1)} (H ${hFinal.toFixed(1)} A ${aFinal.toFixed(1)}) gamePace:${gamePace.toFixed(0)}`};}
+    detail:`Pace-adj: ${(hFinal+aFinal).toFixed(1)} (H ${hFinal.toFixed(1)} A ${aFinal.toFixed(1)}) gamePace:${safeGP.toFixed(0)}`};}
 
 function nbaConsensus(ps,mkt){
   // NetRating highest weight (best predictor), FF raised (independent signal), Star reduced (noisy PER)

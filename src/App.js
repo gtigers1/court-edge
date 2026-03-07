@@ -286,8 +286,11 @@ function nbaMdlTotal(h,a){
   const aProjR=((aOffRtgR+(LEAGUE_ORtg-hDefRtgR))/2)/100*gamePace;
   const hi=injPen(h.roster,0.11,0.055,0.01),ai=injPen(a.roster,0.11,0.055,0.01);
   const restPen=d=>Math.max(0,(2-Math.min(d??2,2))*1.5);
-  const hFinal=(hProj*0.60+hProjR*0.40)*(1-hi)+1.6-restPen(h.rest);
-  const aFinal=(aProj*0.60+aProjR*0.40)*(1-ai)-restPen(a.rest);
+  const hFinalRaw=(hProj*0.60+hProjR*0.40)*(1-hi)+1.6-restPen(h.rest);
+  const aFinalRaw=(aProj*0.60+aProjR*0.40)*(1-ai)-restPen(a.rest);
+  // Guard against NaN/Infinity before .toFixed() — NaN.toFixed() is fine but Infinity.toFixed() throws
+  const hFinal=isFinite(hFinalRaw)&&!isNaN(hFinalRaw)?hFinalRaw:60;
+  const aFinal=isFinite(aFinalRaw)&&!isNaN(aFinalRaw)?aFinalRaw:58;
   return{rawTotal:hFinal+aFinal,hProj:hFinal.toFixed(1),aProj:aFinal.toFixed(1),
     detail:`Pace-adj: ${(hFinal+aFinal).toFixed(1)} (H ${hFinal.toFixed(1)} A ${aFinal.toFixed(1)}) gamePace:${gamePace.toFixed(0)}`};}
 
@@ -310,7 +313,7 @@ function NBAPage(){
   const resetAll=()=>{setAwayTeam("");setHomeTeam("");setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");setContextData(null);setContextError("");};
   const fetchContext=async()=>{if(!homeTeam||!awayTeam)return;setContextLoading(true);setContextError("");try{const r=await fetch("/api/context",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({homeTeam,awayTeam,sport:"nba"})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);setContextData(d);}catch(e){setContextError(e.message);}setContextLoading(false);};
   const cyclePlayer=(side,name)=>{const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];if(!g)return;s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});};
-  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const pyth=nbaMdlPythagorean(homeData,awayData),net=nbaMdlNetRating(homeData,awayData),ff=nbaMdlFourFactors(homeData,awayData),star=nbaMdlStarPower(homeData,awayData),mc=nbaMdlMonteCarlo(homeData,awayData);const mkt=devigged(homeOdds,awayOdds);const hElo=homeData.elo||1500,aElo=awayData.elo||1500;const eloProb=1/(1+Math.pow(10,(aElo-hElo)/400));const h2hG=(homeData.games||[]).filter(g=>g.opp===awayData.espn_id);const h2hW=h2hG.filter(g=>g.win).length;const h2hProb=h2hG.length>=2?h2hW/h2hG.length:null;const divGame=!!(NBA_DIV[homeTeam]&&NBA_DIV[homeTeam]===NBA_DIV[awayTeam]);const altBoost=ALTITUDE_HOME[homeTeam]||0;const hTZ=TZ_OFF[NBA_TZ[homeTeam]]??1.5,aTZ=TZ_OFF[NBA_TZ[awayTeam]]??1.5;const tzAdj=Math.max(-0.015,Math.min(0.015,(hTZ-aTZ)*0.010)); // capped ±1.5% (±4% had no strong evidence)
+  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{try{const pyth=nbaMdlPythagorean(homeData,awayData),net=nbaMdlNetRating(homeData,awayData),ff=nbaMdlFourFactors(homeData,awayData),star=nbaMdlStarPower(homeData,awayData),mc=nbaMdlMonteCarlo(homeData,awayData);const mkt=devigged(homeOdds,awayOdds);const hElo=homeData.elo||1500,aElo=awayData.elo||1500;const eloProb=1/(1+Math.pow(10,(aElo-hElo)/400));const h2hG=(homeData.games||[]).filter(g=>g.opp===awayData.espn_id);const h2hW=h2hG.filter(g=>g.win).length;const h2hProb=h2hG.length>=2?h2hW/h2hG.length:null;const divGame=!!(NBA_DIV[homeTeam]&&NBA_DIV[homeTeam]===NBA_DIV[awayTeam]);const altBoost=ALTITUDE_HOME[homeTeam]||0;const hTZ=TZ_OFF[NBA_TZ[homeTeam]]??1.5,aTZ=TZ_OFF[NBA_TZ[awayTeam]]??1.5;const tzAdj=Math.max(-0.015,Math.min(0.015,(hTZ-aTZ)*0.010)); // capped ±1.5% (±4% had no strong evidence)
       let cons=nbaConsensus([pyth.homeProb,net.homeProb,ff.homeProb,star.homeProb,mc.homeProb],mkt);if(altBoost)cons=Math.min(0.97,Math.max(0.03,cons+altBoost));cons=Math.min(0.97,Math.max(0.03,cons+tzAdj));cons=Math.min(0.97,Math.max(0.03,cons*0.90+eloProb*0.10)); // removed divGame (weak evidence) + H2H (1-3 game sample, pure noise)const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);const mcSpread=hExpN-aExpN;const nrSpread=net.adjDiff; // NR: captures relative team strength, cancels PPG calibration bias
         const ttl=nbaMdlTotal(homeData,awayData);const rawTotal=ttl.rawTotal;const ptN=parseFloat(postedTotal);
         // Adaptive blend: when model is far below market (likely stale PPG data), trust market more
@@ -333,7 +336,7 @@ function NBAPage(){
           :mcSpread*0.27+nrSpread*0.33+derivedSpread*0.40;
         let adjTotal=parseFloat(modelTotal);
         if(contextData){adjSpread+=Math.max(-3,Math.min(3,contextData.spreadAdjustment||0));adjTotal+=Math.max(-5,Math.min(5,contextData.totalAdjustment||0));}
-        setResults({pyth,net,ff,star,mc,mkt,cons:adjCons,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread:adjSpread.toFixed(1),modelTotal:adjTotal.toFixed(1),totalGapFlag,rawModelTotal:rawTotal.toFixed(1)});setTab("results");setAnalyzing(false);},50);};
+        setResults({pyth,net,ff,star,mc,mkt,cons:adjCons,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread:adjSpread.toFixed(1),modelTotal:adjTotal.toFixed(1),totalGapFlag,rawModelTotal:rawTotal.toFixed(1)});setTab("results");}catch(e){console.error("NBA runModels error:",e);}finally{setAnalyzing(false);}},50);};
   const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
   const bothLoaded=awayData&&homeData;const awayAbbr=NBA_ABBR[awayTeam]||"AWY";const homeAbbr=NBA_ABBR[homeTeam]||"HME";
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>

@@ -275,18 +275,18 @@ function nbaMdlTotal(h,a){
   // Separate total model — independent from spread model, uses per-100-possession efficiency
   // Avoids the systematic underestimation caused by using raw PPG at wrong pace
   const hP=h.pace||99,aP=a.pace||99,gamePace=(hP+aP)/2;
-  const LEAGUE_ORtg=115.5; // 2024-25 NBA average offensive rating (pts per 100 possessions)
-  // Convert PPG to per-100-possession offensive/defensive ratings (normalize for team pace)
+  // Per-100-possession ratings: OffRtg = pts scored / pace * 100, DefRtg = pts allowed / pace * 100
   const hOffRtg=(h.home_ppg||h.ppg)/hP*100, hDefRtg=(h.home_opp||h.opp)/hP*100;
   const aOffRtg=(a.away_ppg||a.ppg)/aP*100, aDefRtg=(a.away_opp||a.opp)/aP*100;
-  // Expected score = blend of own offense vs opponent defense, anchored to league avg as stabilizer
-  const hProj=((hOffRtg+(LEAGUE_ORtg-aDefRtg))/2)/100*gamePace;
-  const aProj=((aOffRtg+(LEAGUE_ORtg-hDefRtg))/2)/100*gamePace;
+  // Expected pts = average of team OffRtg and opponent DefRtg (pts allowed), then scale by gamePace
+  // e.g. OffRtg=120, OppDefRtg=111 → (120+111)/2=115.5 → 115.5/100*99 = 114 pts
+  const hProj=((hOffRtg+aDefRtg)/2)/100*gamePace;
+  const aProj=((aOffRtg+hDefRtg)/2)/100*gamePace;
   // Same with last-10 stats for recent form
   const hOffRtgR=(h.last10_ppg||h.ppg)/hP*100, hDefRtgR=(h.last10_opp||h.opp)/hP*100;
   const aOffRtgR=(a.last10_ppg||a.ppg)/aP*100, aDefRtgR=(a.last10_opp||a.opp)/aP*100;
-  const hProjR=((hOffRtgR+(LEAGUE_ORtg-aDefRtgR))/2)/100*gamePace;
-  const aProjR=((aOffRtgR+(LEAGUE_ORtg-hDefRtgR))/2)/100*gamePace;
+  const hProjR=((hOffRtgR+aDefRtgR)/2)/100*gamePace;
+  const aProjR=((aOffRtgR+hDefRtgR)/2)/100*gamePace;
   const hi=injPen(h.roster,0.11,0.055,0.01),ai=injPen(a.roster,0.11,0.055,0.01);
   const restPen=d=>Math.max(0,(2-Math.min(d??2,2))*1.5);
   const hFinalRaw=(hProj*0.60+hProjR*0.40)*(1-hi)+1.6-restPen(h.rest);

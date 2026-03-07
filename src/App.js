@@ -371,9 +371,9 @@ function BestBets({results,awayTeam,homeTeam,homeSpread,postedTotal,sport,accent
   // ML - always available; show the favored side
   if(cons>=0.5)bets.push({label:homeTeam+" ML",conf:cons});
   else bets.push({label:awayTeam+" ML",conf:1-cons});
-  // Spread - only recommend if model disagrees with line by ≥2.5 pts (edge threshold prevents betting noise)
+  // Spread - show whenever a spread is entered; confidence level conveys the edge strength
   const ps=parseFloat(homeSpread);
-  if(!isNaN(ps)&&!isNaN(ms)&&Math.abs(ms+ps)>=2.5){
+  if(!isNaN(ps)&&!isNaN(ms)){
     const ph=normalCDF((ms+ps)/sigmaSpread);
     if(ph>=0.5)bets.push({label:homeTeam+" "+homeSpread,conf:ph});
     else{const al=(-ps)>=0?"+"+(-ps).toFixed(1):(-ps).toFixed(1);bets.push({label:awayTeam+" "+al,conf:1-ph});}

@@ -104,8 +104,8 @@ export default async function handler(req, res) {
       if (isHome) { hSF += s; hAG += t; hCnt++; } else { aSF += s; aAG += t; aCnt++; }
       sSF += s; sAG += t; sCnt++;
     }
-    if (hCnt >= 8) hSplit = { sf: hSF / hCnt, ag: hAG / hCnt };
-    if (aCnt >= 8) aSplit = { sf: aSF / aCnt, ag: aAG / aCnt };
+    if (hCnt >= 5) hSplit = { sf: hSF / hCnt, ag: hAG / hCnt }; // 5 games sufficient for split signal
+    if (aCnt >= 5) aSplit = { sf: aSF / aCnt, ag: aAG / aCnt };
     const schedPPG = sCnt >= 10 ? parseFloat((sSF / sCnt).toFixed(1)) : null;
     const schedOPP = sCnt >= 10 ? parseFloat((sAG / sCnt).toFixed(1)) : null;
 
@@ -200,13 +200,19 @@ export default async function handler(req, res) {
           const ptsIdx  = h.indexOf("PTS");
           const rebIdx  = h.indexOf("REB");
           const astIdx  = h.indexOf("AST");
+          const stlIdx  = h.indexOf("STL");
+          const blkIdx  = h.indexOf("BLK");
+          const tovIdx  = h.indexOf("TOV");
           for (const row of (rs.rowSet || [])) {
             const pName = row[nameIdx];
             if (pName) {
               nbaStatsMap[normKey(pName)] = {
-                ppg: row[ptsIdx] != null ? parseFloat(row[ptsIdx]) : null,
-                rpg: row[rebIdx] != null ? parseFloat(row[rebIdx]) : null,
-                apg: row[astIdx] != null ? parseFloat(row[astIdx]) : null,
+                ppg:   row[ptsIdx] != null ? parseFloat(row[ptsIdx]) : null,
+                rpg:   row[rebIdx] != null ? parseFloat(row[rebIdx]) : null,
+                apg:   row[astIdx] != null ? parseFloat(row[astIdx]) : null,
+                spg:   stlIdx >= 0 && row[stlIdx] != null ? parseFloat(row[stlIdx]) : null,
+                bpg:   blkIdx >= 0 && row[blkIdx] != null ? parseFloat(row[blkIdx]) : null,
+                tovPg: tovIdx >= 0 && row[tovIdx] != null ? parseFloat(row[tovIdx]) : null,
               };
             }
           }
@@ -233,7 +239,7 @@ export default async function handler(req, res) {
       // NBA: prefer NBA.com live stats
       if (sport === "nba" && Object.keys(nbaStatsMap).length > 0) {
         const nb = nbaStatsMap[normKey(fullName)];
-        if (nb) return { name: fullName, position: p.position?.abbreviation || "F", jersey: p.jersey || "", ppg: nb.ppg, rpg: nb.rpg, apg: nb.apg };
+        if (nb) return { name: fullName, position: p.position?.abbreviation || "F", jersey: p.jersey || "", ppg: nb.ppg, rpg: nb.rpg, apg: nb.apg, spg: nb.spg, bpg: nb.bpg, tovPg: nb.tovPg };
       }
       // Fallback: ESPN stat formats (A: splits.categories, B: splits[], C: categories, D: stats)
       const rawSplits = p.statistics?.splits;
@@ -244,10 +250,13 @@ export default async function handler(req, res) {
         p.statistics?.stats || []
       );
       const espnStat = name => { const s = statsArr.find(x => x.name === name || x.abbreviation === name); return s ? parseFloat(s.value) : null; };
-      const ppg = espnStat("avgPoints") ?? espnStat("pts") ?? espnStat("PTS") ?? espnStat("PPG");
-      const rpg = espnStat("avgRebounds") ?? espnStat("reb") ?? espnStat("REB") ?? espnStat("RPG");
-      const apg = espnStat("avgAssists") ?? espnStat("ast") ?? espnStat("AST") ?? espnStat("APG");
-      return { name: fullName, position: p.position?.abbreviation || "F", jersey: p.jersey || "", ppg: ppg > 0 ? ppg : null, rpg: rpg > 0 ? rpg : null, apg: apg > 0 ? apg : null };
+      const ppg   = espnStat("avgPoints")    ?? espnStat("pts") ?? espnStat("PTS") ?? espnStat("PPG");
+      const rpg   = espnStat("avgRebounds")  ?? espnStat("reb") ?? espnStat("REB") ?? espnStat("RPG");
+      const apg   = espnStat("avgAssists")   ?? espnStat("ast") ?? espnStat("AST") ?? espnStat("APG");
+      const spg   = espnStat("avgSteals")    ?? espnStat("stl") ?? espnStat("STL");
+      const bpg   = espnStat("avgBlocks")    ?? espnStat("blk") ?? espnStat("BLK");
+      const tovPg = espnStat("avgTurnovers") ?? espnStat("tov") ?? espnStat("TOV");
+      return { name: fullName, position: p.position?.abbreviation || "F", jersey: p.jersey || "", ppg: ppg > 0 ? ppg : null, rpg: rpg > 0 ? rpg : null, apg: apg > 0 ? apg : null, spg: spg > 0 ? spg : null, bpg: bpg > 0 ? bpg : null, tovPg: tovPg > 0 ? tovPg : null };
     }).filter(p => p.name !== "Unknown").slice(0, 25);
 
     if (playerNames.length === 0) {
@@ -283,13 +292,18 @@ export default async function handler(req, res) {
       if (aSplit) { baseResult.away_ppg = parseFloat(aSplit.sf.toFixed(1)); baseResult.away_opp = parseFloat(aSplit.ag.toFixed(1)); }
 
       const buildRoster = (players) => players.map(p => {
-        const ppg = p.ppg != null ? parseFloat(p.ppg.toFixed(1)) : 5.0;
-        const rpg = p.rpg != null ? parseFloat(p.rpg.toFixed(1)) : 2.0;
-        const apg = p.apg != null ? parseFloat(p.apg.toFixed(1)) : 1.0;
-        const per = parseFloat((ppg*0.9 + rpg*0.3 + apg*0.5).toFixed(1));
+        const ppg   = p.ppg   != null ? parseFloat(p.ppg.toFixed(1))   : 5.0;
+        const rpg   = p.rpg   != null ? parseFloat(p.rpg.toFixed(1))   : 2.0;
+        const apg   = p.apg   != null ? parseFloat(p.apg.toFixed(1))   : 1.0;
+        const spg   = p.spg   != null ? parseFloat(p.spg.toFixed(1))   : 0.5;
+        const bpg   = p.bpg   != null ? parseFloat(p.bpg.toFixed(1))   : 0.3;
+        const tovPg = p.tovPg != null ? parseFloat(p.tovPg.toFixed(1)) : 1.5;
+        // BPM-proxy: more independent from PPG than old formula (ppg*0.9+rpg*0.3+apg*0.5)
+        // Steals+blocks add genuine defensive value; turnovers penalised; -3.5 centers near 0
+        const per = parseFloat((ppg*1.0 + rpg*0.5 + apg*0.7 + (spg+bpg)*1.5 - tovPg*1.0 - 3.5).toFixed(1));
         const role = ppg > 20 ? "STAR" : ppg > 11 ? "KEY" : "ROLE";
         const status = injuryMap[normKey(p.name || "")] || "PLAYING";
-        return { name: p.name, ppg, rpg, apg, per, role, status };
+        return { name: p.name, ppg, rpg, apg, spg, bpg, tovPg, per, role, status };
       });
 
       // Fast path: NBA.com returned stats for most players - no AI needed
@@ -313,11 +327,14 @@ export default async function handler(req, res) {
           if (!d) continue;
           const flat = (d.splits?.categories || []).flatMap(c => c.stats || []);
           const gs = n => { const s = flat.find(x => x.name === n || x.abbreviation === n); return s ? parseFloat(s.value) : null; };
-          const ppg = gs("avgPoints") ?? gs("points");
-          const rpg = gs("avgRebounds") ?? gs("rebounds");
-          const apg = gs("avgAssists") ?? gs("assists");
+          const ppg   = gs("avgPoints")    ?? gs("points");
+          const rpg   = gs("avgRebounds")  ?? gs("rebounds");
+          const apg   = gs("avgAssists")   ?? gs("assists");
+          const spg   = gs("avgSteals")    ?? gs("steals");
+          const bpg   = gs("avgBlocks")    ?? gs("blocks");
+          const tovPg = gs("avgTurnovers") ?? gs("turnovers");
           if (ppg !== null) {
-            nbaStatsMap[normKey(players20[i].fullName || players20[i].displayName || "")] = { ppg, rpg, apg };
+            nbaStatsMap[normKey(players20[i].fullName || players20[i].displayName || "")] = { ppg, rpg, apg, spg, bpg, tovPg };
           }
         }
       } catch(_) {}

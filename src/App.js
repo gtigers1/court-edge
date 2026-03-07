@@ -200,23 +200,23 @@ function nbaMdlNetRating(h,a){
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hNet:hBlend.toFixed(1),aNet:aBlend.toFixed(1),adjDiff,detail:`H Net ${hBlend>0?"+":""}${hBlend.toFixed(1)}  A Net ${aBlend>0?"+":""}${aBlend.toFixed(1)}  Diff: ${adjDiff.toFixed(1)}`};}
 
 function nbaMdlFourFactors(h,a){
-  // Four Factors: eFG% 40%, TOV% 25%, OREB% 20%, FTR 15%
-  // INDEPENDENT from PPG/opp signal  -  uses efficiency ratios
+  // Four Factors: eFG% 47%, TOV% 27%, OREB% 18%, FTR 8%
+  // Literature weights: eFG most predictive, FTR weakest; INDEPENDENT from PPG/opp signal
   // NBA average: eFG ~52%, TOV ~13%, OREB ~25%, FTR ~23%
   const ff=d=>{
-    const efg=(d.efg_pct||0.52)*0.40;
+    const efg=(d.efg_pct||0.52)*0.47;
     // tov_rate from API is turnovers per 100 possessions (NBA avg ~13)
     // Normalize to 0-1 where lower is better: (25-tov)/25 scaled
-    const tov=(1-Math.min(d.tov_rate||13,25)/25)*0.25;
-    const oreb=(d.oreb_pct||0.25)*0.20;
-    const ftr=Math.min(d.ftr||d.ft_rate||0.22,0.50)*0.15;
+    const tov=(1-Math.min(d.tov_rate||13,25)/25)*0.27;
+    const oreb=(d.oreb_pct||0.25)*0.18;
+    const ftr=Math.min(d.ftr||d.ft_rate||0.22,0.50)*0.08;
     return efg+tov+oreb+ftr;};
   const hFF=ff(h),aFF=ff(a);
   // Small HCA: home teams shoot ~0.5% better eFG, steal ~0.5% fewer possessions
-  const hFFadj=hFF+0.002*0.40+0.001*0.25;
+  const hFFadj=hFF+0.002*0.47+0.001*0.27;
   const hi=injPen(h.roster,0.06,0.03,0.008);
   const ai=injPen(a.roster,0.06,0.03,0.008);
-  const p=logistic((hFFadj-aFF)*9-(hi-ai)*3.5);
+  const p=logistic((hFFadj-aFF)*12-(hi-ai)*3.5); // *12 calibrates to realistic NBA win-prob range
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hFF:hFF.toFixed(4),aFF:aFF.toFixed(4),detail:`H FF: ${hFF.toFixed(3)}  A FF: ${aFF.toFixed(3)}`};}
 
 function nbaMdlStarPower(h,a){
@@ -268,10 +268,33 @@ function nbaMdlMonteCarlo(h,a,N=10000){
   const inputNote=`  Input PPG: H ${hPPG.toFixed(0)} A ${aPPG.toFixed(0)}  OPP: H ${hOPP.toFixed(0)} A ${aOPP.toFixed(0)}`;
   return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts${restNote}${paceNote}${inputNote}`};}
 
+function nbaMdlTotal(h,a){
+  // Separate total model — independent from spread model, uses per-100-possession efficiency
+  // Avoids the systematic underestimation caused by using raw PPG at wrong pace
+  const hP=h.pace||99,aP=a.pace||99,gamePace=(hP+aP)/2;
+  const LEAGUE_ORtg=115.5; // 2024-25 NBA average offensive rating (pts per 100 possessions)
+  // Convert PPG to per-100-possession offensive/defensive ratings (normalize for team pace)
+  const hOffRtg=(h.home_ppg||h.ppg)/hP*100, hDefRtg=(h.home_opp||h.opp)/hP*100;
+  const aOffRtg=(a.away_ppg||a.ppg)/aP*100, aDefRtg=(a.away_opp||a.opp)/aP*100;
+  // Expected score = blend of own offense vs opponent defense, anchored to league avg as stabilizer
+  const hProj=((hOffRtg+(LEAGUE_ORtg-aDefRtg))/2)/100*gamePace;
+  const aProj=((aOffRtg+(LEAGUE_ORtg-hDefRtg))/2)/100*gamePace;
+  // Same with last-10 stats for recent form
+  const hOffRtgR=(h.last10_ppg||h.ppg)/hP*100, hDefRtgR=(h.last10_opp||h.opp)/hP*100;
+  const aOffRtgR=(a.last10_ppg||a.ppg)/aP*100, aDefRtgR=(a.last10_opp||a.opp)/aP*100;
+  const hProjR=((hOffRtgR+(LEAGUE_ORtg-aDefRtgR))/2)/100*gamePace;
+  const aProjR=((aOffRtgR+(LEAGUE_ORtg-hDefRtgR))/2)/100*gamePace;
+  const hi=injPen(h.roster,0.11,0.055,0.01),ai=injPen(a.roster,0.11,0.055,0.01);
+  const restPen=d=>Math.max(0,(2-Math.min(d??2,2))*1.5);
+  const hFinal=(hProj*0.60+hProjR*0.40)*(1-hi)+1.6-restPen(h.rest);
+  const aFinal=(aProj*0.60+aProjR*0.40)*(1-ai)-restPen(a.rest);
+  return{rawTotal:hFinal+aFinal,hProj:hFinal.toFixed(1),aProj:aFinal.toFixed(1),
+    detail:`Pace-adj: ${(hFinal+aFinal).toFixed(1)} (H ${hFinal.toFixed(1)} A ${aFinal.toFixed(1)}) gamePace:${gamePace.toFixed(0)}`};}
+
 function nbaConsensus(ps,mkt){
-  // NetRating gets most weight  -  it's the best single NBA predictor
+  // NetRating highest weight (best predictor), FF raised (independent signal), Star reduced (noisy PER)
   // 15% shrinkage toward 50% to prevent overconfidence from stale/incomplete data
-  const m=Math.min(0.97,Math.max(0.03,[0.20,0.28,0.18,0.16,0.18].reduce((s,w,i)=>s+ps[i]*w,0)));
+  const m=Math.min(0.97,Math.max(0.03,[0.15,0.32,0.24,0.10,0.19].reduce((s,w,i)=>s+ps[i]*w,0)));
   const shrunk=0.5+(m-0.5)*0.85;
   // Market (de-vigged) encodes injuries, sharp money, line movement  -  33% weight when available
   if(mkt===null||mkt===undefined)return shrunk;
@@ -287,8 +310,9 @@ function NBAPage(){
   const resetAll=()=>{setAwayTeam("");setHomeTeam("");setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");setContextData(null);setContextError("");};
   const fetchContext=async()=>{if(!homeTeam||!awayTeam)return;setContextLoading(true);setContextError("");try{const r=await fetch("/api/context",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({homeTeam,awayTeam,sport:"nba"})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);setContextData(d);}catch(e){setContextError(e.message);}setContextLoading(false);};
   const cyclePlayer=(side,name)=>{const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];if(!g)return;s({...g,roster:g.roster.map(p=>p.name!==name?p:{...p,status:STATUS_CYCLE[(STATUS_CYCLE.indexOf(p.status)+1)%4]})});};
-  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const pyth=nbaMdlPythagorean(homeData,awayData),net=nbaMdlNetRating(homeData,awayData),ff=nbaMdlFourFactors(homeData,awayData),star=nbaMdlStarPower(homeData,awayData),mc=nbaMdlMonteCarlo(homeData,awayData);const mkt=devigged(homeOdds,awayOdds);const hElo=homeData.elo||1500,aElo=awayData.elo||1500;const eloProb=1/(1+Math.pow(10,(aElo-hElo)/400));const h2hG=(homeData.games||[]).filter(g=>g.opp===awayData.espn_id);const h2hW=h2hG.filter(g=>g.win).length;const h2hProb=h2hG.length>=2?h2hW/h2hG.length:null;const divGame=!!(NBA_DIV[homeTeam]&&NBA_DIV[homeTeam]===NBA_DIV[awayTeam]);const altBoost=ALTITUDE_HOME[homeTeam]||0;const hTZ=TZ_OFF[NBA_TZ[homeTeam]]??1.5,aTZ=TZ_OFF[NBA_TZ[awayTeam]]??1.5;const tzAdj=Math.max(-0.02,Math.min(0.04,(hTZ-aTZ)*0.010));let cons=nbaConsensus([pyth.homeProb,net.homeProb,ff.homeProb,star.homeProb,mc.homeProb],mkt);if(altBoost)cons=Math.min(0.97,Math.max(0.03,cons+altBoost));if(divGame)cons=cons*0.92+0.5*0.08;cons=Math.min(0.97,Math.max(0.03,cons+tzAdj));if(h2hProb!==null)cons=cons*0.94+h2hProb*0.06;cons=Math.min(0.97,Math.max(0.03,cons*0.90+eloProb*0.10));const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);const mcSpread=hExpN-aExpN;const nrSpread=net.adjDiff; // NR: captures relative team strength, cancels PPG calibration bias
-        const rawTotal=hExpN+aExpN;const ptN=parseFloat(postedTotal);
+  const runModels=()=>{if(!homeData||!awayData)return;setAnalyzing(true);setTimeout(()=>{const pyth=nbaMdlPythagorean(homeData,awayData),net=nbaMdlNetRating(homeData,awayData),ff=nbaMdlFourFactors(homeData,awayData),star=nbaMdlStarPower(homeData,awayData),mc=nbaMdlMonteCarlo(homeData,awayData);const mkt=devigged(homeOdds,awayOdds);const hElo=homeData.elo||1500,aElo=awayData.elo||1500;const eloProb=1/(1+Math.pow(10,(aElo-hElo)/400));const h2hG=(homeData.games||[]).filter(g=>g.opp===awayData.espn_id);const h2hW=h2hG.filter(g=>g.win).length;const h2hProb=h2hG.length>=2?h2hW/h2hG.length:null;const divGame=!!(NBA_DIV[homeTeam]&&NBA_DIV[homeTeam]===NBA_DIV[awayTeam]);const altBoost=ALTITUDE_HOME[homeTeam]||0;const hTZ=TZ_OFF[NBA_TZ[homeTeam]]??1.5,aTZ=TZ_OFF[NBA_TZ[awayTeam]]??1.5;const tzAdj=Math.max(-0.015,Math.min(0.015,(hTZ-aTZ)*0.010)); // capped ±1.5% (±4% had no strong evidence)
+      let cons=nbaConsensus([pyth.homeProb,net.homeProb,ff.homeProb,star.homeProb,mc.homeProb],mkt);if(altBoost)cons=Math.min(0.97,Math.max(0.03,cons+altBoost));cons=Math.min(0.97,Math.max(0.03,cons+tzAdj));cons=Math.min(0.97,Math.max(0.03,cons*0.90+eloProb*0.10)); // removed divGame (weak evidence) + H2H (1-3 game sample, pure noise)const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);const mcSpread=hExpN-aExpN;const nrSpread=net.adjDiff; // NR: captures relative team strength, cancels PPG calibration bias
+        const ttl=nbaMdlTotal(homeData,awayData);const rawTotal=ttl.rawTotal;const ptN=parseFloat(postedTotal);
         // Adaptive blend: when model is far below market (likely stale PPG data), trust market more
         // Gap 0-8 pts → 50/50 | Gap 8-15 pts → 30/70 | Gap 15+ pts → 15/85
         const totalGap=!isNaN(ptN)?ptN-rawTotal:0;
@@ -298,11 +322,15 @@ function NBAPage(){
         // Compute adjCons first so derivedSpread incorporates all model+market+context signals
         let adjCons=cons;
         if(contextData)adjCons=Math.min(0.97,Math.max(0.03,cons+Math.max(-0.05,Math.min(0.05,contextData.homeMLAdjustment||0))));
-        // Derive spread from full consensus win probability (all 5 models + market + altitude/H2H/ELO/TZ adjustments)
+        // Derive spread from full consensus win probability (all 5 models + market + altitude/ELO/TZ)
         // logit(p)*7.0 ≈ invNormalCDF(p)*11.5 — converts win prob to expected home point margin
         const derivedSpread=Math.log(adjCons/(1-adjCons))*7.0;
-        // Three-way blend: MC 25% (raw projected scores) + NR 35% (bias-resistant relative) + derived 40% (full consensus)
-        let adjSpread=mcSpread*0.25+nrSpread*0.35+derivedSpread*0.40;
+        // Market spread as direct 4th signal — the posted line is the sharpest aggregate predictor
+        const spreadMkt=!isNaN(parseFloat(homeSpread))?-parseFloat(homeSpread):null;
+        // Four-way blend: MC 20% + NR 25% + derived 30% + market spread 25% (when available)
+        let adjSpread=spreadMkt!==null
+          ?mcSpread*0.20+nrSpread*0.25+derivedSpread*0.30+spreadMkt*0.25
+          :mcSpread*0.27+nrSpread*0.33+derivedSpread*0.40;
         let adjTotal=parseFloat(modelTotal);
         if(contextData){adjSpread+=Math.max(-3,Math.min(3,contextData.spreadAdjustment||0));adjTotal+=Math.max(-5,Math.min(5,contextData.totalAdjustment||0));}
         setResults({pyth,net,ff,star,mc,mkt,cons:adjCons,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread:adjSpread.toFixed(1),modelTotal:adjTotal.toFixed(1),totalGapFlag,rawModelTotal:rawTotal.toFixed(1)});setTab("results");setAnalyzing(false);},50);};
@@ -364,8 +392,8 @@ function NBAPage(){
 function BestBets({results,awayTeam,homeTeam,homeSpread,postedTotal,sport,accent}){
   if(!results||results.cons==null)return null;
   const cons=results.cons,ms=parseFloat(results.modelSpread),mt=parseFloat(results.modelTotal);
-  const sigmaSpread=sport==="nhl"?2.4:sport==="ncaam"?14.1:16.3;
-  const sigmaTotal=sport==="nhl"?1.8:sport==="ncaam"?18:20;
+  const sigmaSpread=sport==="nhl"?2.4:sport==="ncaam"?14.1:12.5; // NBA empirical margin SD ~12-13, not sqrt(2)*11.5=16.3
+  const sigmaTotal=sport==="nhl"?1.8:sport==="ncaam"?18:15;    // NBA empirical total SD ~14-15, not 20
   const ac=accent||C.copper;
   const bets=[];
   // ML - always available; show the favored side

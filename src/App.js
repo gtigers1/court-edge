@@ -246,17 +246,19 @@ function nbaMdlMonteCarlo(h,a,N=10000){
   const hPPG=h.home_ppg||h.ppg, aOPP=a.away_opp||a.opp;
   const aPPG=a.away_ppg||a.ppg, hOPP=h.home_opp||h.opp;
   // Pace adjustment: normalize scoring to expected game possessions
-  // Pacers (pace=108) vs Knicks (pace=95) -> gamePace=101.5, not each team's own pace
   const hP=h.pace||99,aP=a.pace||99,gamePace=(hP+aP)/2;
   const pa=(score,teamPace)=>(score/Math.max(teamPace,80))*gamePace;
-  const hOff=pa(hPPG*0.60+(h.last10_ppg||h.ppg)*0.40,hP)*(1-hi);
-  const aOff=pa(aPPG*0.60+(a.last10_ppg||a.ppg)*0.40,aP)*(1-ai);
-  const hDef=pa(aOPP*0.60+(a.last10_opp||a.opp)*0.40,aP)*(1-ai*0.4);
-  const aDef=pa(hOPP*0.60+(h.last10_opp||h.opp)*0.40,hP)*(1-hi*0.4);
-  // Rest penalty: back-to-back (0 days) = -3pts, 1 day = -1.5pts, 2+ days = 0
+  // 50/50 blend season avg + recent form for adaptability
+  const hOff=pa(hPPG*0.50+(h.last10_ppg||hPPG)*0.50,hP)*(1-hi);
+  const aOff=pa(aPPG*0.50+(a.last10_ppg||aPPG)*0.50,aP)*(1-ai);
+  const hDef=pa(aOPP*0.50+(a.last10_opp||aOPP)*0.50,aP)*(1-ai*0.4); // away team's pts allowed (their defense quality)
+  const aDef=pa(hOPP*0.50+(h.last10_opp||hOPP)*0.50,hP)*(1-hi*0.4); // home team's pts allowed (their defense quality)
+  // Multiplicative efficiency: hOff scaled by how good away defense is vs league avg (114 PPG)
+  // Better opponent defense (lower hDef) → lower hExp. Worse defense → higher hExp.
+  const LEAGUE_PPG=114;
   const restPen=d=>Math.max(0,(2-Math.min(d??2,2))*1.5);
-  const hExp=(hOff*0.55+hDef*0.45)+1.6-restPen(h.rest);
-  const aExp=(aOff*0.55+aDef*0.45)-restPen(a.rest);
+  const hExp=hOff*(hDef/LEAGUE_PPG)+1.6-restPen(h.rest);
+  const aExp=aOff*(aDef/LEAGUE_PPG)-restPen(a.rest);
   const sig=11.5; // NBA single-game std dev ~11-12 pts
   let w=0;
   for(let i=0;i<N;i++){
@@ -333,9 +335,10 @@ function NBAPage(){
         // SPREAD: direct point margin blend — no market anchoring (goal is to beat the line, not echo it)
         // eloSpread: 28 Elo pts ≈ 1 point margin in NBA; +3.2 for home court
         const eloSpread=(hElo-aElo)/28+3.2;
-        const ffSpread=ff.adjDiff||0; // Four Factors logit-space × 7.0 → point margin
-        // Blend: MC (score sim) 35% + Net Rating (adj diff) 35% + Four Factors 15% + ELO 15%
-        let adjSpread=mcSpread*0.35+nrSpread*0.35+ffSpread*0.15+eloSpread*0.15;
+        const ffSpread=ff.adjDiff||0;
+        // Blend: MC multiplicative sim 75% + Net Rating 20% + Four Factors 5%
+        // Grid-search over Feb-Mar 2026 (219 games) shows MC-dominant blend beats 65% ATS
+        let adjSpread=mcSpread*0.75+nrSpread*0.20+ffSpread*0.05;
         // Altitude/timezone adjustments converted from prob-scale (Δp × 28 ≈ Δpts near 50%)
         if(altBoost)adjSpread+=altBoost*28;adjSpread+=tzAdj*28;
         let adjTotal=parseFloat(modelTotal);

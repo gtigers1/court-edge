@@ -69,16 +69,18 @@ export default async function handler(req, res) {
       daysSinceLastGame = Math.max(0, Math.floor((new Date() - lastDate) / (1000 * 60 * 60 * 24)));
     }
 
+    // ESPN schedule returns score as object {value:125,displayValue:"125"}, not a plain number
+    const scoreVal = c => parseFloat(c?.score?.value ?? c?.score?.displayValue ?? c?.score) || 0;
+
     const last10 = completed.slice(-10);
     let l10SF = 0, l10AG = 0, l10Cnt = 0;
     for (const ev of last10) {
       const comp = ev.competitions?.[0];
       const ours = comp?.competitors?.find(c => String(c.id) === teamNumId);
       const theirs = comp?.competitors?.find(c => String(c.id) !== teamNumId);
-      if (ours?.score != null && theirs?.score != null) {
-        const s = parseFloat(ours.score)||0, t = parseFloat(theirs.score)||0;
-        l10SF += s; l10AG += t; l10Cnt++;
-        if (s > t) l10wins++; else l10losses++;
+      if (ours && theirs) {
+        const s = scoreVal(ours), t = scoreVal(theirs);
+        if (s > 0 || t > 0) { l10SF += s; l10AG += t; l10Cnt++; if (s > t) l10wins++; else l10losses++; }
       }
     }
     if (l10Cnt >= 3) { l10ppg = l10SF / l10Cnt; l10opp = l10AG / l10Cnt; }
@@ -91,8 +93,9 @@ export default async function handler(req, res) {
       if (!comp) continue;
       const ours = comp.competitors?.find(c => String(c.id) === teamNumId);
       const theirs = comp.competitors?.find(c => String(c.id) !== teamNumId);
-      if (!ours || !theirs || ours.score == null || theirs.score == null) continue;
-      const s = parseFloat(ours.score) || 0, t = parseFloat(theirs.score) || 0;
+      if (!ours || !theirs) continue;
+      const s = scoreVal(ours), t = scoreVal(theirs);
+      if (s === 0 && t === 0) continue;
       const isHome = ours.homeAway === "home";
       const win = s > t ? 1 : 0;
       if (theirs.id) teamGames.push({ opp: String(theirs.id), win: win === 1 });

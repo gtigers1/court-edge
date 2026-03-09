@@ -216,8 +216,8 @@ function nbaMdlFourFactors(h,a){
   const hFFadj=hFF+0.002*0.47+0.001*0.27;
   const hi=injPen(h.roster,0.06,0.03,0.008);
   const ai=injPen(a.roster,0.06,0.03,0.008);
-  const p=logistic((hFFadj-aFF)*12-(hi-ai)*3.5); // *12 calibrates to realistic NBA win-prob range
-  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hFF:hFF.toFixed(4),aFF:aFF.toFixed(4),detail:`H FF: ${hFF.toFixed(3)}  A FF: ${aFF.toFixed(3)}`};}
+  const ffInput=(hFFadj-aFF)*12-(hi-ai)*3.5;const p=logistic(ffInput); // *12 calibrates to realistic NBA win-prob range
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hFF:hFF.toFixed(4),aFF:aFF.toFixed(4),adjDiff:ffInput*7.0,detail:`H FF: ${hFF.toFixed(3)}  A FF: ${aFF.toFixed(3)}`};}
 
 function nbaMdlStarPower(h,a){
   // Star power model: top 3 players drive outcomes (different signal from team averages)
@@ -327,18 +327,17 @@ function NBAPage(){
         const mktW=!isNaN(ptN)?(totalGap>=15?0.85:totalGap>=8?0.70:0.50):0;
         const modelTotal=(!isNaN(ptN)?rawTotal*(1-mktW)+ptN*mktW:rawTotal).toFixed(1);
         const totalGapFlag=!isNaN(ptN)&&totalGap>=10;
-        // Compute adjCons first so derivedSpread incorporates all model+market+context signals
+        // Context adjusts win probability for display purposes only
         let adjCons=cons;
         if(contextData)adjCons=Math.min(0.97,Math.max(0.03,cons+Math.max(-0.05,Math.min(0.05,contextData.homeMLAdjustment||0))));
-        // Derive spread from full consensus win probability (all 5 models + market + altitude/ELO/TZ)
-        // logit(p)*7.0 ≈ invNormalCDF(p)*11.5 — converts win prob to expected home point margin
-        const derivedSpread=Math.log(adjCons/(1-adjCons))*7.0;
-        // Market spread as direct 4th signal — the posted line is the sharpest aggregate predictor
-        const spreadMkt=!isNaN(parseFloat(homeSpread))?-parseFloat(homeSpread):null;
-        // Four-way blend: MC 20% + NR 25% + derived 30% + market spread 25% (when available)
-        let adjSpread=spreadMkt!==null
-          ?mcSpread*0.20+nrSpread*0.25+derivedSpread*0.30+spreadMkt*0.25
-          :mcSpread*0.27+nrSpread*0.33+derivedSpread*0.40;
+        // SPREAD: direct point margin blend — no market anchoring (goal is to beat the line, not echo it)
+        // eloSpread: 28 Elo pts ≈ 1 point margin in NBA; +3.2 for home court
+        const eloSpread=(hElo-aElo)/28+3.2;
+        const ffSpread=ff.adjDiff||0; // Four Factors logit-space × 7.0 → point margin
+        // Blend: MC (score sim) 35% + Net Rating (adj diff) 35% + Four Factors 15% + ELO 15%
+        let adjSpread=mcSpread*0.35+nrSpread*0.35+ffSpread*0.15+eloSpread*0.15;
+        // Altitude/timezone adjustments converted from prob-scale (Δp × 28 ≈ Δpts near 50%)
+        if(altBoost)adjSpread+=altBoost*28;adjSpread+=tzAdj*28;
         let adjTotal=parseFloat(modelTotal);
         if(contextData){adjSpread+=Math.max(-3,Math.min(3,contextData.spreadAdjustment||0));adjTotal+=Math.max(-5,Math.min(5,contextData.totalAdjustment||0));}
         setResults({pyth,net,ff,star,mc,mkt,cons:adjCons,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread:adjSpread.toFixed(1),modelTotal:adjTotal.toFixed(1),totalGapFlag,rawModelTotal:rawTotal.toFixed(1)});setTab("results");}catch(e){console.error("NBA runModels error:",e);setModelError(e.message||String(e));}finally{setAnalyzing(false);}},50);};
@@ -405,15 +404,17 @@ function BestBets({results,awayTeam,homeTeam,homeSpread,postedTotal,sport,accent
   const sigmaTotal=sport==="nhl"?1.8:sport==="ncaam"?18:15;    // NBA empirical total SD ~14-15, not 20
   const ac=accent||C.copper;
   const bets=[];
-  // ML - always available; show the favored side
-  if(cons>=0.5)bets.push({label:homeTeam+" ML",conf:cons});
-  else bets.push({label:awayTeam+" ML",conf:1-cons});
-  // Spread - show whenever a spread is entered; confidence level conveys the edge strength
+  // Spread — primary bet (pays -110 regardless of line; better value than ML favorites)
   const ps=parseFloat(homeSpread);
   if(!isNaN(ps)&&!isNaN(ms)){
     const ph=normalCDF((ms+ps)/sigmaSpread);
     if(ph>=0.5)bets.push({label:homeTeam+" "+homeSpread,conf:ph});
     else{const al=(-ps)>=0?"+"+(-ps).toFixed(1):(-ps).toFixed(1);bets.push({label:awayTeam+" "+al,conf:1-ph});}
+  }
+  // ML — only when no spread is entered (fallback mode)
+  if(isNaN(ps)||isNaN(ms)){
+    if(cons>=0.5)bets.push({label:homeTeam+" ML",conf:cons});
+    else bets.push({label:awayTeam+" ML",conf:1-cons});
   }
   // Total - if user entered total and model has an expected total
   // Dampen confidence when model-market gap is large (model likely has stale data)

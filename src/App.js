@@ -261,7 +261,7 @@ function nbaMdlMonteCarlo(h,a,N=10000){
   const aDef=pa(hOPP*0.50+(h.last10_opp||hOPP)*0.50,hP)*(1-hi*0.4); // home team's pts allowed (their defense quality)
   // Multiplicative efficiency: hOff scaled by how good away defense is vs league avg (114 PPG)
   // Better opponent defense (lower hDef) → lower hExp. Worse defense → higher hExp.
-  const LEAGUE_PPG=114;
+  const LEAGUE_PPG=116;
   const restPen=d=>Math.max(0,(2-Math.min(d??2,2))*1.5);
   const hExp=hOff*(hDef/LEAGUE_PPG)+1.6-restPen(h.rest);
   const aExp=aOff*(aDef/LEAGUE_PPG)-restPen(a.rest);
@@ -332,7 +332,7 @@ function NBAPage(){
         // Adaptive blend: when model is far below market (likely stale PPG data), trust market more
         // Gap 0-8 pts → 50/50 | Gap 8-15 pts → 30/70 | Gap 15+ pts → 15/85
         const totalGap=!isNaN(ptN)?ptN-rawTotal:0;
-        const mktW=!isNaN(ptN)?(totalGap>=15?0.85:totalGap>=8?0.70:0.50):0;
+        const mktW=!isNaN(ptN)?(totalGap>=15?0.90:totalGap>=8?0.80:0.65):0;
         const modelTotal=(!isNaN(ptN)?rawTotal*(1-mktW)+ptN*mktW:rawTotal).toFixed(1);
         const totalGapFlag=!isNaN(ptN)&&totalGap>=10;
         // Context adjusts win probability for display purposes only
@@ -347,6 +347,10 @@ function NBAPage(){
         let adjSpread=mcSpread*0.75+nrSpread*0.20+ffSpread*0.05;
         // Altitude/timezone adjustments converted from prob-scale (Δp × 28 ≈ Δpts near 50%)
         if(altBoost)adjSpread+=altBoost*28;adjSpread+=tzAdj*28;
+        // Big underdog dampening: when Vegas line >= 12pts, blowout favorites tend to cover more reliably;
+        // pull model 25% toward Vegas to avoid over-fading large favorites
+        const vegsMarginRaw=homeSpread?-parseFloat(homeSpread):0;
+        if(homeSpread&&!isNaN(vegsMarginRaw)&&Math.abs(vegsMarginRaw)>=12){adjSpread=adjSpread*0.75+vegsMarginRaw*0.25;}
         let adjTotal=parseFloat(modelTotal);
         if(contextData){adjSpread+=Math.max(-3,Math.min(3,contextData.spreadAdjustment||0));adjTotal+=Math.max(-5,Math.min(5,contextData.totalAdjustment||0));}
         setResults({pyth,net,ff,star,mc,mkt,cons:adjCons,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread:adjSpread.toFixed(1),modelTotal:adjTotal.toFixed(1),totalGapFlag,rawModelTotal:rawTotal.toFixed(1)});setTab("results");}catch(e){console.error("NBA runModels error:",e);setModelError(e.message||String(e));}finally{setAnalyzing(false);}},50);};
@@ -497,7 +501,7 @@ function NBAResults({results,contextData,awayTeam,homeTeam,awayAbbr,homeAbbr,awa
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.copper,textTransform:"uppercase",marginBottom:10}}>Model Lines</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-          <div style={{background:C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+C.border}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Model Spread</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:C.copper}}>{parseFloat(modelSpread)>=0?homeAbbr+" -"+modelSpread:awayAbbr+" -"+Math.abs(parseFloat(modelSpread)).toFixed(1)}</div>{homeSpread&&<div style={{fontSize:11,color:Math.abs(parseFloat(modelSpread))-Math.abs(parseFloat(homeSpread))>0?C.teal:C.muted,marginTop:4}}>Posted {homeSpread} - Edge: {(parseFloat(modelSpread)+parseFloat(homeSpread)).toFixed(1)}pt {parseFloat(modelSpread)+parseFloat(homeSpread)>0?homeAbbr+" covers":awayAbbr+" covers"}</div>}</div>
+          <div style={{background:C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+C.border}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Model Spread</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:C.copper}}>{parseFloat(modelSpread)>=0?homeAbbr+" -"+modelSpread:awayAbbr+" -"+Math.abs(parseFloat(modelSpread)).toFixed(1)}</div>{homeSpread&&(()=>{const delta=parseFloat(modelSpread)+parseFloat(homeSpread);const bigEdge=Math.abs(delta)>=2;const coversTeam=delta>0?homeAbbr:awayAbbr;const edgeColor=delta>0?C.teal:"#f87171";return <div style={{marginTop:6}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,color:bigEdge?edgeColor:C.muted}}>{delta>0?"▲":"▼"} {coversTeam} covers</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>Posted {homeSpread} · Edge: {delta>0?"+":""}{delta.toFixed(1)}pt</div>{bigEdge&&<div style={{fontSize:9,color:C.amber,marginTop:3,letterSpacing:.5,textTransform:"uppercase"}}>Strong edge — {Math.abs(delta).toFixed(1)}pt vs line</div>}</div>;})()}</div>
           <div style={{background:totalGapFlag?"#1a0a0a":C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+(totalGapFlag?C.amber+"66":C.border)}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Model Total{totalGapFlag?" ⚠ LOW CONF":""}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:totalGapFlag?C.amber:C.copper}}>{modelTotal} pts</div>{rawModelTotal&&totalGapFlag&&<div style={{fontSize:10,color:C.amber,marginTop:2}}>Raw model: {rawModelTotal} — large gap vs line, avoid total bet</div>}{postedTotal&&<div style={{fontSize:11,color:Math.abs(parseFloat(modelTotal)-parseFloat(postedTotal))>=2?C.teal:C.muted,marginTop:4}}>Posted {postedTotal} - {parseFloat(modelTotal)>parseFloat(postedTotal)?"OVER by "+(parseFloat(modelTotal)-parseFloat(postedTotal)).toFixed(1):"UNDER by "+(parseFloat(postedTotal)-parseFloat(modelTotal)).toFixed(1)}</div>}</div>
         </div>
         {(divGame||altBoost>0||Math.abs(tzAdj)>=0.01||(h2hG&&h2hG.length>=2))&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:contextData?6:0}}>{divGame&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.amber+"18",color:C.amber,border:"1px solid "+C.amber+"44"}}>DIV GAME - tighter line</span>}{altBoost>0&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.copper+"18",color:C.copper,border:"1px solid "+C.copper+"44"}}>ALTITUDE +{(altBoost*100).toFixed(0)}% {homeAbbr}</span>}{tzAdj>0.01&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.teal+"18",color:C.teal,border:"1px solid "+C.teal+"44"}}>TZ ADV +{(tzAdj*100).toFixed(0)}% {homeAbbr}</span>}{tzAdj<-0.01&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.teal+"18",color:C.teal,border:"1px solid "+C.teal+"44"}}>TZ ADV +{(Math.abs(tzAdj)*100).toFixed(0)}% {awayAbbr}</span>}{h2hG&&h2hG.length>=2&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#a78bfa18",color:"#a78bfa",border:"1px solid #a78bfa44"}}>H2H: {homeAbbr} {h2hW}-{h2hG.length-h2hW} this season</span>}</div>}

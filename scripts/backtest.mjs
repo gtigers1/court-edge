@@ -34,7 +34,7 @@ function nbaMdlNetRating(h,a) {
 
 function nbaMdlMonteCarlo(h,a) {
   // Multiplicative efficiency: team_offense × (opponent_defense / league_avg)
-  const LEAGUE_PPG=114;
+  const LEAGUE_PPG=116;
   // Blend season avg 50% with recent form 50% for more adaptability
   const hOff=(h.home_ppg||h.ppg)*0.50+(h.last10_ppg||h.ppg)*0.50;
   const aOff=(a.away_ppg||a.ppg)*0.50+(a.last10_ppg||a.ppg)*0.50;

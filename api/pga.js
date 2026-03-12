@@ -79,6 +79,36 @@ Rules:
 - reason: one sentence why this player contends
 Return ONLY the JSON object, nothing else.`;
 
+    // Perplexity supports response_format: {type:"json_schema"} — enforces exact output structure
+    const playerSchema = {
+      type: "object",
+      properties: {
+        players: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              rank:                { type: "integer" },
+              name:                { type: "string" },
+              sg_total:            { type: ["number","null"] },
+              sg_approach:         { type: ["number","null"] },
+              sg_off_tee:          { type: ["number","null"] },
+              driving_accuracy:    { type: ["number","null"] },
+              scoring_avg:         { type: ["number","null"] },
+              recent_top10:        { type: ["integer","null"] },
+              recent_cut_rate:     { type: ["number","null"] },
+              best_finish_players: { type: ["integer","null"] },
+              has_top20_players:   { type: "integer" },
+              preview_rank:        { type: "integer" },
+              reason:              { type: "string" }
+            },
+            required: ["rank","name","reason"]
+          }
+        }
+      },
+      required: ["players"]
+    };
+
     const pplxResp = await fetchT("https://api.perplexity.ai/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + pplxKey },
@@ -88,7 +118,7 @@ Return ONLY the JSON object, nothing else.`;
           { role: "system", content: systemMsg },
           { role: "user", content: userMsg }
         ],
-        response_format: { type: "json_object" },
+        response_format: { type: "json_schema", json_schema: { schema: playerSchema } },
         temperature: 0.1,
         max_tokens: 5000
       })

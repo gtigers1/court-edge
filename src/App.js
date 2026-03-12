@@ -1177,41 +1177,39 @@ function DailyPage(){
 }
 
 // ─── PGA ────────────────────────────────────────────────────────────────────
-const PGA_G="#4ade80"; // golf green accent
+const PGA_G="#4ade80";
 
-const PGA_WEIGHTS_DEF=[
-  {key:"sg_total",label:"SG: Total",cat:"Strokes Gained",tip:"Overall strokes gained vs field",higher:true,def:2.5},
-  {key:"sg_approach",label:"SG: Approach",cat:"Strokes Gained",tip:"SG approach — critical at TPC Sawgrass",higher:true,def:2.0},
-  {key:"sg_off_tee",label:"SG: Off Tee",cat:"Strokes Gained",tip:"SG off the tee",higher:true,def:1.5},
-  {key:"driving_accuracy",label:"Drive Acc%",cat:"Accuracy",tip:"Driving accuracy — island green demands precision",higher:true,def:1.0},
-  {key:"scoring_avg",label:"Scoring Avg",cat:"Scoring",tip:"Season scoring average (lower = better)",higher:false,def:1.5},
-  {key:"recent_avg_finish",label:"Avg Finish",cat:"Recent Form",tip:"Average finish position last 8 events (lower = better)",higher:false,def:1.5},
-  {key:"recent_top10",label:"Top-10s",cat:"Recent Form",tip:"Top-10 finishes in last 8 events",higher:true,def:1.0},
-  {key:"recent_cut_rate",label:"Cut Rate",cat:"Recent Form",tip:"Fraction of cuts made in last 8 events",higher:true,def:0.5},
-  {key:"best_finish_players",label:"Best Finish",cat:"Course Hist.",tip:"Best career finish at THE PLAYERS (lower = better; 999 = no history)",higher:false,def:2.0},
-  {key:"has_top20_players",label:"Top-20 Hist.",cat:"Course Hist.",tip:"1 if player has a top-20 at THE PLAYERS",higher:true,def:1.0},
-  {key:"preview_rank",label:"Expert Pick",cat:"Market",tip:"Expert/analyst preview ranking (1 = top pick; 999 = unmentioned)",higher:false,def:1.5},
+const PGA_W_DEF=[
+  {key:"sg_total",label:"SG: Total",cat:"Strokes Gained",higher:true,def:2.5},
+  {key:"sg_approach",label:"SG: Approach",cat:"Strokes Gained",higher:true,def:2.0},
+  {key:"sg_off_tee",label:"SG: Off Tee",cat:"Strokes Gained",higher:true,def:1.5},
+  {key:"driving_accuracy",label:"Drive Acc%",cat:"Accuracy",higher:true,def:1.0},
+  {key:"scoring_avg",label:"Scoring Avg",cat:"Scoring",higher:false,def:1.5},
+  {key:"recent_top10",label:"Recent Top-10s",cat:"Recent Form",higher:true,def:1.0},
+  {key:"recent_cut_rate",label:"Cut Rate",cat:"Recent Form",higher:true,def:0.5},
+  {key:"best_finish_players",label:"Best Finish",cat:"Course History",higher:false,def:2.0},
+  {key:"has_top20_players",label:"Top-20 History",cat:"Course History",higher:true,def:1.0},
+  {key:"preview_rank",label:"Expert Rank",cat:"Market",higher:false,def:1.5},
 ];
-const PGA_INIT_W=Object.fromEntries(PGA_WEIGHTS_DEF.map(d=>[d.key,d.def]));
+const PGA_INIT_W=Object.fromEntries(PGA_W_DEF.map(d=>[d.key,d.def]));
 
 function pgaScore(players,weights){
-  // Z-score each feature, weight, sum, softmax
   const stats={};
-  PGA_WEIGHTS_DEF.forEach(({key})=>{
-    const vals=players.map(p=>p[key]).filter(v=>v!==null&&typeof v==="number"&&!isNaN(v));
+  PGA_W_DEF.forEach(({key})=>{
+    const vals=players.map(p=>p[key]).filter(v=>v!==null&&typeof v==="number"&&isFinite(v));
     if(!vals.length){stats[key]={mean:0,std:1};return;}
     const mean=vals.reduce((s,v)=>s+v,0)/vals.length;
     const std=Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/vals.length)||1;
     stats[key]={mean,std};
   });
   const scored=players.map(p=>{
-    let comp=0,totalW=0;
-    PGA_WEIGHTS_DEF.forEach(({key,higher})=>{
-      const v=p[key];if(v===null||typeof v!=="number"||isNaN(v))return;
+    let comp=0,tw=0;
+    PGA_W_DEF.forEach(({key,higher})=>{
+      const v=p[key];if(v===null||typeof v!=="number"||!isFinite(v))return;
       const {mean,std}=stats[key];const w=weights[key]||0;
-      comp+=(higher?(v-mean)/std:-(v-mean)/std)*w;totalW+=w;
+      comp+=(higher?(v-mean)/std:-(v-mean)/std)*w;tw+=w;
     });
-    return{...p,composite:totalW>0?comp:0};
+    return{...p,composite:tw>0?comp:0};
   });
   const maxC=Math.max(...scored.map(p=>p.composite));
   const exps=scored.map(p=>Math.exp(Math.min(p.composite-maxC,50)));
@@ -1226,73 +1224,123 @@ function PGAPage(){
   const [error,setError]=useState("");
   const [weights,setWeights]=useState({...PGA_INIT_W});
   const [showW,setShowW]=useState(false);
-  const [sortBy,setSortBy]=useState("win_pct");
-  const [sortDir,setSortDir]=useState("desc");
+  const [sortBy,setSortBy]=useState("rank");
+  const [sortDir,setSortDir]=useState("asc");
   const [ranked,setRanked]=useState([]);
   const [toast,setToast]=useState("");
 
   const fetchData=async()=>{
     setLoading(true);setError("");
     try{const r=await fetch("/api/pga");const d=await r.json();
-      if(!r.ok)throw new Error(d.error||"Error "+r.status);setData(d);}
+      if(!r.ok)throw new Error(d.error||"Error "+r.status);
+      setData(d);}
     catch(e){setError(e.message);}
     setLoading(false);
   };
   useEffect(()=>{fetchData();},[]);
-  useEffect(()=>{if(!data?.players?.length)return;setRanked(pgaScore(data.players,weights));},[data,weights]);
+  useEffect(()=>{if(data?.players?.length)setRanked(pgaScore(data.players,weights));},[data,weights]);
 
-  const doSort=(k)=>{if(sortBy===k)setSortDir(d=>d==="desc"?"asc":"desc");else{setSortBy(k);setSortDir(k==="name"?"asc":"desc");}};
-  const sorted=[...ranked].sort((a,b)=>{const m=sortDir==="desc"?-1:1;if(sortBy==="name")return m*(a.name||"").localeCompare(b.name||"");return m*((a[sortBy]||0)-(b[sortBy]||0));});
+  const doSort=k=>{if(sortBy===k)setSortDir(d=>d==="asc"?"desc":"asc");else{setSortBy(k);setSortDir(k==="name"?"asc":"desc");}};
+  const sorted=[...ranked].sort((a,b)=>{const m=sortDir==="desc"?-1:1;if(sortBy==="name")return m*(a.name||"").localeCompare(b.name||"");return m*((a[sortBy]??0)-(b[sortBy]??0));});
 
   const exportCSV=()=>{
-    const h=["Rank","Player","Win%","SG Tot","SG App","SG OTT","Drive%","Score Avg","Avg Fin","Top10","Cut%","Best@PLAYERS","Top20Hist","Expert"];
-    const rows=ranked.map(p=>[p.rank,`"${p.name}"`,((p.win_pct||0)*100).toFixed(2),p.sg_total??"",p.sg_approach??"",p.sg_off_tee??"",p.driving_accuracy??"",p.scoring_avg??"",p.recent_avg_finish??"",p.recent_top10??"",(p.recent_cut_rate!==null?((p.recent_cut_rate||0)*100).toFixed(0):""),p.best_finish_players===999||p.best_finish_players===null?"":p.best_finish_players,p.has_top20_players,p.preview_rank===999?"":p.preview_rank].join(",")).join("\n");
+    const h=["Rank","Player","Win%","SG Tot","SG App","SG OTT","Drive%","Score Avg","Top10","Cut%","Best@PLAYERS","Expert","Reason"];
+    const rows=ranked.map(p=>[p.rank,`"${p.name}"`,((p.win_pct||0)*100).toFixed(2),p.sg_total??"",p.sg_approach??"",p.sg_off_tee??"",p.driving_accuracy??"",p.scoring_avg??"",p.recent_top10??"",(p.recent_cut_rate!=null?((p.recent_cut_rate||0)*100).toFixed(0):""),p.best_finish_players==null||p.best_finish_players>=99?"":p.best_finish_players,p.preview_rank>=99?"":p.preview_rank,`"${p.reason||""}"`].join(",")).join("\n");
     const blob=new Blob([h.join(",")+"\n"+rows],{type:"text/csv"});
     const url=URL.createObjectURL(blob);const a=document.createElement("a");
     a.href=url;a.download="players-championship-2026.csv";a.click();URL.revokeObjectURL(url);
     setToast("CSV exported!");setTimeout(()=>setToast(""),2200);
   };
 
-  const top20=ranked.slice(0,20);
-  const maxW=top20[0]?.win_pct||1;
-  const cats=[...new Set(PGA_WEIGHTS_DEF.map(d=>d.cat))];
-
-  const TH=({k,l})=><th onClick={()=>doSort(k)} style={{padding:"6px 8px",textAlign:k==="name"?"left":"center",color:sortBy===k?PGA_G:C.muted,cursor:"pointer",whiteSpace:"nowrap",fontSize:9,letterSpacing:1,fontFamily:"'Barlow Condensed'",fontWeight:800,userSelect:"none"}}>
-    {l}{sortBy===k?(sortDir==="desc"?" ▼":" ▲"):""}</th>;
+  const top10=ranked.slice(0,10);
+  const maxW=top10[0]?.win_pct||0.01;
+  const cats=[...new Set(PGA_W_DEF.map(d=>d.cat))];
+  const TH=({k,l})=><th onClick={()=>doSort(k)} style={{padding:"6px 8px",textAlign:k==="name"?"left":"center",color:sortBy===k?PGA_G:C.muted,cursor:"pointer",whiteSpace:"nowrap",fontSize:9,letterSpacing:1,fontFamily:"'Barlow Condensed'",fontWeight:800,userSelect:"none"}}>{l}{sortBy===k?(sortDir==="asc"?" ▲":" ▼"):""}</th>;
+  const medals=["🥇","🥈","🥉"];
 
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
     {/* Header */}
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-      <SectionHeader label={data?.tournament||"THE PLAYERS Championship 2026"} accent={PGA_G}
-        right={<button onClick={fetchData} disabled={loading} className="hov-btn" style={{padding:"5px 12px",background:PGA_G+"22",border:"1px solid "+PGA_G+"66",color:PGA_G,borderRadius:6,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:12,display:"flex",alignItems:"center",gap:4}}>
-          {loading?<span className="spin" style={{fontSize:14}}>⟳</span>:"↻"} REFRESH</button>}/>
-      <div style={{padding:"10px 16px",display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}>
+      <SectionHeader label={(data?.tournament||"THE PLAYERS Championship 2026").toUpperCase()} accent={PGA_G}
+        right={<button onClick={fetchData} disabled={loading} className="hov-btn" style={{padding:"5px 14px",background:PGA_G+"22",border:"1px solid "+PGA_G+"66",color:PGA_G,borderRadius:6,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:12,display:"flex",alignItems:"center",gap:5}}>
+          {loading?<span className="spin">⟳</span>:"↻"} REFRESH</button>}/>
+      <div style={{padding:"8px 16px 10px",display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
         <span style={{fontSize:11,color:C.muted}}>
-          {loading&&<span className="pulse">Fetching player data via Perplexity...</span>}
+          {loading&&<span className="pulse" style={{color:PGA_G}}>Analyzing 2025-26 season data via Perplexity AI...</span>}
           {error&&<span style={{color:C.amber}}>⚠ {error}</span>}
-          {data&&!loading&&<span>
+          {data&&!loading&&<>
             <span style={{color:PGA_G,fontWeight:700}}>{data.players?.length||0} players</span>
-            {" · "}<span style={{color:C.muted}}>{data.course||"TPC Sawgrass"}</span>
-            {data.espnEventFound&&<span style={{color:PGA_G,marginLeft:6}}>● ESPN field found</span>}
-          </span>}
+            <span style={{color:C.dim}}> · </span>
+            <span>{data.course||"TPC Sawgrass"}</span>
+            {data.espnEventFound&&<><span style={{color:C.dim}}> · </span><span style={{color:PGA_G}}>● ESPN field active</span></>}
+          </>}
         </span>
-        {ranked.length>0&&<button onClick={exportCSV} className="hov-btn" style={{marginLeft:"auto",padding:"5px 12px",background:C.black,border:"1px solid "+C.border,color:C.muted,borderRadius:6,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:11}}>⬇ CSV</button>}
+        {ranked.length>0&&<button onClick={exportCSV} className="hov-btn" style={{marginLeft:"auto",padding:"4px 10px",background:C.black,border:"1px solid "+C.border,color:C.muted,borderRadius:6,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:10}}>⬇ CSV</button>}
       </div>
     </div>
+
+    {/* Loading skeleton */}
+    {loading&&!data&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:40,textAlign:"center"}}>
+      <div className="pulse" style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:20,color:PGA_G,letterSpacing:2}}>LOADING PREDICTIONS...</div>
+      <div style={{fontSize:11,color:C.muted,marginTop:8}}>Fetching SG stats, recent form & course history</div>
+    </div>}
+
+    {/* ── PREDICTED TOP 10 FINISHERS ── */}
+    {top10.length>0&&<div style={{background:C.card,border:"1px solid "+PGA_G+"44",borderRadius:12,overflow:"hidden"}}>
+      <div style={{padding:"10px 16px",background:"linear-gradient(90deg,"+PGA_G+"18,transparent)",borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:8}}>
+        <div style={{width:3,height:16,borderRadius:2,background:PGA_G}}/>
+        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:15,letterSpacing:2,color:PGA_G,textTransform:"uppercase"}}>Predicted Top 10 Finishers</span>
+        <span style={{fontSize:10,color:C.muted,marginLeft:4}}>TPC Sawgrass · 2026</span>
+      </div>
+      {/* Podium — top 3 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,padding:"14px 14px 0"}}>
+        {top10.slice(0,3).map((p,i)=><div key={p.name} style={{background:i===0?"linear-gradient(135deg,"+PGA_G+"22,"+PGA_G+"0a)":C.black,borderRadius:10,padding:"14px 10px",border:"1px solid "+(i===0?PGA_G+"66":C.border),textAlign:"center"}}>
+          <div style={{fontSize:22,marginBottom:4}}>{medals[i]}</div>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:i===0?16:14,color:i===0?PGA_G:C.white,lineHeight:1.1,marginBottom:6}}>{p.name}</div>
+          <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:20,color:PGA_G,marginBottom:2}}>{((p.win_pct||0)*100).toFixed(1)}%</div>
+          <div style={{fontSize:9,color:C.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:p.reason?6:0}}>Win probability</div>
+          {p.reason&&<div style={{fontSize:9,color:C.muted,lineHeight:1.4,marginTop:4,fontStyle:"italic"}}>{p.reason}</div>}
+          <div style={{display:"flex",gap:4,flexWrap:"wrap",justifyContent:"center",marginTop:6}}>
+            {p.has_top20_players===1&&<span style={{fontSize:8,padding:"1px 5px",borderRadius:3,background:PGA_G+"22",color:PGA_G,border:"1px solid "+PGA_G+"44"}}>COURSE HIST</span>}
+            {p.preview_rank<=5&&p.preview_rank<99&&<span style={{fontSize:8,padding:"1px 5px",borderRadius:3,background:C.amber+"22",color:C.amber,border:"1px solid "+C.amber+"44"}}>#{p.preview_rank} EXPERT</span>}
+          </div>
+        </div>)}
+      </div>
+      {/* Positions 4-10 */}
+      <div style={{padding:"10px 14px 14px",display:"flex",flexDirection:"column",gap:6}}>
+        {top10.slice(3).map((p,i)=><div key={p.name} style={{display:"flex",alignItems:"center",gap:12,background:C.black,borderRadius:8,padding:"8px 12px",border:"1px solid "+C.border}}>
+          <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:18,color:C.muted,minWidth:24,textAlign:"center"}}>{i+4}</span>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,color:C.white}}>{p.name}
+              {p.has_top20_players===1&&<span style={{marginLeft:6,fontSize:8,padding:"1px 4px",borderRadius:3,background:PGA_G+"22",color:PGA_G,border:"1px solid "+PGA_G+"44"}}>HIST</span>}
+            </div>
+            {p.reason&&<div style={{fontSize:10,color:C.muted,marginTop:1}}>{p.reason}</div>}
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:15,color:PGA_G}}>{((p.win_pct||0)*100).toFixed(1)}%</div>
+            {p.sg_total!=null&&<div style={{fontSize:9,color:C.muted}}>SG {p.sg_total>0?"+":""}{p.sg_total?.toFixed(2)}</div>}
+          </div>
+          {/* Mini bar */}
+          <div style={{width:50,height:4,borderRadius:2,background:C.border,overflow:"hidden"}}>
+            <div style={{height:"100%",width:((p.win_pct/maxW)*100)+"%",background:PGA_G+"99",borderRadius:2}}/>
+          </div>
+        </div>)}
+      </div>
+    </div>}
 
     {/* Weight Controls */}
     {ranked.length>0&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
       <div onClick={()=>setShowW(v=>!v)} style={{padding:"10px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,userSelect:"none"}}>
-        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:PGA_G,textTransform:"uppercase"}}>Model Weights</span>
-        <span style={{color:C.muted,fontSize:11,marginLeft:4}}>{showW?"▲":"▼"}</span>
+        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:PGA_G,textTransform:"uppercase"}}>Adjust Model Weights</span>
+        <span style={{color:C.muted,fontSize:11}}>{showW?"▲":"▼ expand"}</span>
         <button onClick={e=>{e.stopPropagation();setWeights({...PGA_INIT_W});}} style={{marginLeft:"auto",fontSize:10,padding:"3px 8px",background:C.black,border:"1px solid "+C.border,color:C.muted,borderRadius:4,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:700}}>RESET</button>
       </div>
-      {showW&&<div style={{padding:"0 16px 16px",display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
+      {showW&&<div style={{padding:"0 16px 16px",display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:12}}>
         {cats.map(cat=><div key={cat}>
           <div style={{fontSize:9,color:PGA_G,letterSpacing:1.5,textTransform:"uppercase",marginBottom:6,fontWeight:700}}>{cat}</div>
-          {PGA_WEIGHTS_DEF.filter(d=>d.cat===cat).map(({key,label,tip})=><div key={key} style={{marginBottom:8}}>
+          {PGA_W_DEF.filter(d=>d.cat===cat).map(({key,label})=><div key={key} style={{marginBottom:8}}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-              <span style={{fontSize:10,color:C.muted}} title={tip}>{label}</span>
+              <span style={{fontSize:10,color:C.muted}}>{label}</span>
               <span style={{fontSize:10,color:PGA_G,fontWeight:700}}>{(weights[key]||0).toFixed(1)}×</span>
             </div>
             <input type="range" min="0" max="5" step="0.5" value={weights[key]||0}
@@ -1303,64 +1351,43 @@ function PGAPage(){
       </div>}
     </div>}
 
-    {/* Bar Chart — Top 20 */}
-    {top20.length>0&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-      <div style={{padding:"10px 16px",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:PGA_G,textTransform:"uppercase",borderBottom:"1px solid "+C.border}}>Top 20 — Win Probability</div>
-      <div style={{padding:16,overflowX:"auto"}}>
-        <svg width={Math.max(top20.length*36,300)} height={220} style={{display:"block"}}>
-          {top20.map((p,i)=>{
-            const barH=Math.max(4,(p.win_pct/maxW)*160);
-            const colW=Math.max(top20.length*36,300)/top20.length;
-            const x=i*colW;const barW=colW-4;const y=170-barH;
-            return <g key={p.name} transform={`translate(${x+2},0)`}>
-              <rect x={0} y={y} width={barW} height={barH} fill={i===0?PGA_G:i<3?PGA_G+"99":PGA_G+"44"} rx={2}/>
-              <text x={barW/2} y={y-4} textAnchor="middle" fontSize={9} fill={i<3?PGA_G:C.dim} fontFamily="Barlow Condensed" fontWeight={700}>{((p.win_pct||0)*100).toFixed(1)}%</text>
-              <text x={barW/2} y={200} textAnchor="middle" fontSize={8} fill={i===0?PGA_G:C.dim} fontFamily="Barlow Condensed" fontWeight={700} transform={`rotate(-40,${barW/2},200)`}>{p.name.split(" ").pop()}</text>
-            </g>;
-          })}
-        </svg>
-      </div>
-    </div>}
-
-    {/* Full Field Table */}
+    {/* Full Rankings Table */}
     {sorted.length>0&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-      <div style={{padding:"10px 16px",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:PGA_G,textTransform:"uppercase",borderBottom:"1px solid "+C.border}}>Full Field Rankings</div>
+      <div style={{padding:"10px 16px",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:PGA_G,textTransform:"uppercase",borderBottom:"1px solid "+C.border}}>Full Model Rankings — {sorted.length} Players</div>
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'Barlow'"}}>
           <thead><tr style={{borderBottom:"1px solid "+C.border}}>
             <TH k="rank" l="RK"/><TH k="name" l="PLAYER"/><TH k="win_pct" l="WIN%"/>
             <TH k="sg_total" l="SG TOT"/><TH k="sg_approach" l="SG APP"/><TH k="sg_off_tee" l="SG OTT"/>
             <TH k="driving_accuracy" l="DA%"/><TH k="scoring_avg" l="SCORE"/>
-            <TH k="recent_avg_finish" l="AVG FIN"/><TH k="recent_top10" l="TOP10"/>
-            <TH k="best_finish_players" l="BEST@PLYR"/><TH k="preview_rank" l="EXPERT"/>
+            <TH k="recent_top10" l="TOP10"/><TH k="best_finish_players" l="BEST@PLYR"/>
+            <TH k="preview_rank" l="EXPERT"/>
           </tr></thead>
           <tbody>{sorted.map((p,i)=>{
-            const top3=p.rank<=3;
-            const sgC=v=>v===null?"—":v>1?PGA_G:v<0?"#f87171":C.muted;
-            return <tr key={p.name} style={{borderBottom:"1px solid "+C.border+"44",background:i%2===0?"transparent":C.black+"44"}}>
+            const top3=p.rank<=3;const sgC=v=>v==null?"—":v>1?PGA_G:v<0?"#f87171":C.muted;
+            return <tr key={p.name} style={{borderBottom:"1px solid "+C.border+"44",background:i%2===0?"transparent":C.black+"44",cursor:"default"}} title={p.reason||""}>
               <td style={{padding:"6px 8px",textAlign:"center",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:13,color:p.rank===1?PGA_G:p.rank<=3?PGA_G+"99":C.muted}}>{p.rank}</td>
               <td style={{padding:"6px 8px",color:C.white,fontWeight:top3?700:400,minWidth:150,whiteSpace:"nowrap"}}>
                 {p.name}
                 {p.has_top20_players===1&&<span style={{marginLeft:5,fontSize:8,padding:"1px 4px",borderRadius:3,background:PGA_G+"22",color:PGA_G,border:"1px solid "+PGA_G+"44"}}>HIST</span>}
-                {p.preview_rank<=5&&p.preview_rank!==999&&<span style={{marginLeft:4,fontSize:8,padding:"1px 4px",borderRadius:3,background:C.amber+"22",color:C.amber,border:"1px solid "+C.amber+"44"}}>#{p.preview_rank}</span>}
+                {p.preview_rank<=5&&p.preview_rank<99&&<span style={{marginLeft:4,fontSize:8,padding:"1px 4px",borderRadius:3,background:C.amber+"22",color:C.amber,border:"1px solid "+C.amber+"44"}}>#{p.preview_rank}</span>}
               </td>
               <td style={{padding:"6px 8px",textAlign:"center",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:13,color:top3?PGA_G:C.white}}>{((p.win_pct||0)*100).toFixed(1)}%</td>
               <td style={{padding:"6px 8px",textAlign:"center",color:sgC(p.sg_total)}}>{p.sg_total?.toFixed(2)??"—"}</td>
-              <td style={{padding:"6px 8px",textAlign:"center",color:p.sg_approach!==null&&p.sg_approach>0.5?PGA_G:C.muted}}>{p.sg_approach?.toFixed(2)??"—"}</td>
+              <td style={{padding:"6px 8px",textAlign:"center",color:p.sg_approach>0.5?PGA_G:C.muted}}>{p.sg_approach?.toFixed(2)??"—"}</td>
               <td style={{padding:"6px 8px",textAlign:"center",color:C.muted}}>{p.sg_off_tee?.toFixed(2)??"—"}</td>
               <td style={{padding:"6px 8px",textAlign:"center",color:C.muted}}>{p.driving_accuracy?.toFixed(1)??"—"}</td>
               <td style={{padding:"6px 8px",textAlign:"center",color:C.muted}}>{p.scoring_avg?.toFixed(2)??"—"}</td>
-              <td style={{padding:"6px 8px",textAlign:"center",color:C.muted}}>{p.recent_avg_finish?.toFixed(1)??"—"}</td>
               <td style={{padding:"6px 8px",textAlign:"center",color:p.recent_top10>=3?PGA_G:C.muted}}>{p.recent_top10??"—"}</td>
-              <td style={{padding:"6px 8px",textAlign:"center",color:p.best_finish_players!==null&&p.best_finish_players!==999&&p.best_finish_players<=10?PGA_G:C.muted}}>{p.best_finish_players===null||p.best_finish_players===999?"—":p.best_finish_players}</td>
-              <td style={{padding:"6px 8px",textAlign:"center",color:p.preview_rank<=5&&p.preview_rank!==999?C.amber:C.muted}}>{p.preview_rank===999||p.preview_rank===null?"—":"#"+p.preview_rank}</td>
+              <td style={{padding:"6px 8px",textAlign:"center",color:p.best_finish_players!=null&&p.best_finish_players<99&&p.best_finish_players<=10?PGA_G:C.muted}}>{p.best_finish_players==null||p.best_finish_players>=99?"—":p.best_finish_players}</td>
+              <td style={{padding:"6px 8px",textAlign:"center",color:p.preview_rank<=5&&p.preview_rank<99?C.amber:C.muted}}>{p.preview_rank==null||p.preview_rank>=99?"—":"#"+p.preview_rank}</td>
             </tr>;
           })}</tbody>
         </table>
       </div>
     </div>}
 
-    {!loading&&!error&&!data&&<div style={{textAlign:"center",padding:60,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,letterSpacing:2}}>LOADING PLAYER DATA...</div>}
+    {!loading&&!error&&!data&&<div style={{textAlign:"center",padding:60,color:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:16,letterSpacing:2}}>CLICK REFRESH TO LOAD PREDICTIONS</div>}
     {toast&&<div className="toast" style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:PGA_G,color:C.black,padding:"8px 20px",borderRadius:20,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,zIndex:999}}>{toast}</div>}
   </div>;
 }

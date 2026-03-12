@@ -1273,6 +1273,7 @@ function PGAPage(){
             <span style={{color:C.dim}}> · </span>
             <span>{data.course||"TPC Sawgrass"}</span>
             {data.espnEventFound&&<><span style={{color:C.dim}}> · </span><span style={{color:PGA_G}}>● ESPN field active</span></>}
+            {data.debug&&<span style={{color:C.amber,marginLeft:6,fontFamily:"monospace",fontSize:10}}>⚠ parse fail: {data.debug.slice(0,120)}</span>}
           </>}
         </span>
         {ranked.length>0&&<button onClick={exportCSV} className="hov-btn" style={{marginLeft:"auto",padding:"4px 10px",background:C.black,border:"1px solid "+C.border,color:C.muted,borderRadius:6,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:10}}>⬇ CSV</button>}

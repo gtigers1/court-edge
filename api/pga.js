@@ -113,7 +113,7 @@ Return ONLY the JSON object, nothing else.`;
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + pplxKey },
       body: JSON.stringify({
-        model: "llama-3.1-sonar-large-128k-online",
+        model: "sonar-pro",
         messages: [
           { role: "system", content: systemMsg },
           { role: "user", content: userMsg }

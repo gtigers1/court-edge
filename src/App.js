@@ -154,6 +154,11 @@ function ModelCard({icon,name,desc,awayTeam,homeTeam,awayAbbr,homeAbbr,awayProb,
 const NBA_TEAMS=["Atlanta Hawks","Boston Celtics","Brooklyn Nets","Charlotte Hornets","Chicago Bulls","Cleveland Cavaliers","Dallas Mavericks","Denver Nuggets","Detroit Pistons","Golden State Warriors","Houston Rockets","Indiana Pacers","LA Clippers","Los Angeles Lakers","Memphis Grizzlies","Miami Heat","Milwaukee Bucks","Minnesota Timberwolves","New Orleans Pelicans","New York Knicks","Oklahoma City Thunder","Orlando Magic","Philadelphia 76ers","Phoenix Suns","Portland Trail Blazers","Sacramento Kings","San Antonio Spurs","Toronto Raptors","Utah Jazz","Washington Wizards"];
 const NBA_ABBR={"Atlanta Hawks":"ATL","Boston Celtics":"BOS","Brooklyn Nets":"BKN","Charlotte Hornets":"CHA","Chicago Bulls":"CHI","Cleveland Cavaliers":"CLE","Dallas Mavericks":"DAL","Denver Nuggets":"DEN","Detroit Pistons":"DET","Golden State Warriors":"GSW","Houston Rockets":"HOU","Indiana Pacers":"IND","LA Clippers":"LAC","Los Angeles Lakers":"LAL","Memphis Grizzlies":"MEM","Miami Heat":"MIA","Milwaukee Bucks":"MIL","Minnesota Timberwolves":"MIN","New Orleans Pelicans":"NOP","New York Knicks":"NYK","Oklahoma City Thunder":"OKC","Orlando Magic":"ORL","Philadelphia 76ers":"PHI","Phoenix Suns":"PHX","Portland Trail Blazers":"POR","Sacramento Kings":"SAC","San Antonio Spurs":"SAS","Toronto Raptors":"TOR","Utah Jazz":"UTA","Washington Wizards":"WAS"};
 
+// Bottom-tier / lottery teams — high variance, inconsistent effort, rotation flux, potential tanking
+// Games involving these teams should suppress spread confidence and show a HIGH VARIANCE warning
+// Updated periodically based on standings (2025-26 season, as of March 2026)
+const NBA_HIGH_VARIANCE=new Set(["Washington Wizards","Brooklyn Nets","Charlotte Hornets","Chicago Bulls","San Antonio Spurs","Detroit Pistons","Utah Jazz","Portland Trail Blazers","Philadelphia 76ers","Toronto Raptors"]);
+
 // IMPROVED MODELS v2  -  Restructured for accuracy
 // Key changes:
 // - HCA applied ONCE, correctly calibrated per sport
@@ -254,11 +259,12 @@ function nbaMdlMonteCarlo(h,a,N=10000){
   // Pace adjustment: normalize scoring to expected game possessions
   const hP=h.pace||99,aP=a.pace||99,gamePace=(hP+aP)/2;
   const pa=(score,teamPace)=>(score/Math.max(teamPace,80))*gamePace;
-  // 50/50 blend season avg + recent form for adaptability
-  const hOff=pa(hPPG*0.50+(h.last10_ppg||hPPG)*0.50,hP)*(1-hi);
-  const aOff=pa(aPPG*0.50+(a.last10_ppg||aPPG)*0.50,aP)*(1-ai);
-  const hDef=pa(aOPP*0.50+(a.last10_opp||aOPP)*0.50,aP)*(1-ai*0.4); // away team's pts allowed (their defense quality)
-  const aDef=pa(hOPP*0.50+(h.last10_opp||hOPP)*0.50,hP)*(1-hi*0.4); // home team's pts allowed (their defense quality)
+  // 35/65 blend season avg + recent form — recent form weighted more heavily to capture
+  // mid-season roster changes, load management, and tanking behavior
+  const hOff=pa(hPPG*0.35+(h.last10_ppg||hPPG)*0.65,hP)*(1-hi);
+  const aOff=pa(aPPG*0.35+(a.last10_ppg||aPPG)*0.65,aP)*(1-ai);
+  const hDef=pa(aOPP*0.35+(a.last10_opp||aOPP)*0.65,aP)*(1-ai*0.4); // away team's pts allowed (their defense quality)
+  const aDef=pa(hOPP*0.35+(h.last10_opp||hOPP)*0.65,hP)*(1-hi*0.4); // home team's pts allowed (their defense quality)
   // Multiplicative efficiency: hOff scaled by how good away defense is vs league avg (114 PPG)
   // Better opponent defense (lower hDef) → lower hExp. Worse defense → higher hExp.
   const LEAGUE_PPG=116;
@@ -347,13 +353,22 @@ function NBAPage(){
         let adjSpread=mcSpread*0.75+nrSpread*0.20+ffSpread*0.05;
         // Altitude/timezone adjustments converted from prob-scale (Δp × 28 ≈ Δpts near 50%)
         if(altBoost)adjSpread+=altBoost*28;adjSpread+=tzAdj*28;
-        // Big underdog dampening: when Vegas line >= 12pts, blowout favorites tend to cover more reliably;
-        // pull model 25% toward Vegas to avoid over-fading large favorites
+        // Tiered blowout dampening: large-spread favorites underperform ATS at high rate
+        // (3/12-3/13 data: big favorites 2-8 ATS = 25%). Pull model toward Vegas margin.
+        // ≥9pts: 20% | ≥12pts: 35% | ≥15pts: 50%
         const vegsMarginRaw=homeSpread?-parseFloat(homeSpread):0;
-        if(homeSpread&&!isNaN(vegsMarginRaw)&&Math.abs(vegsMarginRaw)>=12){adjSpread=adjSpread*0.75+vegsMarginRaw*0.25;}
+        if(homeSpread&&!isNaN(vegsMarginRaw)){
+          const absVM=Math.abs(vegsMarginRaw);
+          const blowoutW=absVM>=15?0.50:absVM>=12?0.35:absVM>=9?0.20:0;
+          if(blowoutW>0) adjSpread=adjSpread*(1-blowoutW)+vegsMarginRaw*blowoutW;
+        }
         let adjTotal=parseFloat(modelTotal);
+        // Garbage time inflation: when a blowout is projected (|margin|≥12), losing team
+        // scores freely with reserves in 4th quarter, inflating the final total ~4 pts
+        if(Math.abs(adjSpread)>=12) adjTotal+=4;
         if(contextData){adjSpread+=Math.max(-3,Math.min(3,contextData.spreadAdjustment||0));adjTotal+=Math.max(-5,Math.min(5,contextData.totalAdjustment||0));}
-        setResults({pyth,net,ff,star,mc,mkt,cons:adjCons,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread:adjSpread.toFixed(1),modelTotal:adjTotal.toFixed(1),totalGapFlag,rawModelTotal:rawTotal.toFixed(1)});setTab("results");}catch(e){console.error("NBA runModels error:",e);setModelError(e.message||String(e));}finally{setAnalyzing(false);}},50);};
+        const tankWarning=NBA_HIGH_VARIANCE.has(homeTeam)||NBA_HIGH_VARIANCE.has(awayTeam);
+        setResults({pyth,net,ff,star,mc,mkt,cons:adjCons,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread:adjSpread.toFixed(1),modelTotal:adjTotal.toFixed(1),totalGapFlag,rawModelTotal:rawTotal.toFixed(1),tankWarning});setTab("results");}catch(e){console.error("NBA runModels error:",e);setModelError(e.message||String(e));}finally{setAnalyzing(false);}},50);};
   const inp={width:"100%",padding:"10px 12px",background:C.black,border:"1.5px solid "+C.border,borderRadius:8,color:C.white,fontSize:13,outline:"none",fontFamily:"'Barlow',sans-serif"};
   const bothLoaded=awayData&&homeData;const awayAbbr=NBA_ABBR[awayTeam]||"AWY";const homeAbbr=NBA_ABBR[homeTeam]||"HME";
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
@@ -460,7 +475,7 @@ function BestBets({results,awayTeam,homeTeam,homeSpread,postedTotal,sport,accent
 
 function NBAResults({results,contextData,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOdds,homeSpread,postedTotal,tab,setTab,onRecalc}){
   const [copied,setCopied]=useState(false);
-  const {pyth,net,ff,star,mc,cons,mkt,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread,modelTotal,totalGapFlag,rawModelTotal}=results;const cH=cons,aw=1-cH;
+  const {pyth,net,ff,star,mc,cons,mkt,eloProb,h2hG,h2hW,h2hProb,divGame,altBoost,tzAdj,modelSpread,modelTotal,totalGapFlag,rawModelTotal,tankWarning}=results;const cH=cons,aw=1-cH;
   const hI=oddsToImplied(homeOdds),aI=oddsToImplied(awayOdds);
   const hE=hI!==null?((cH-hI)*100).toFixed(1):null,aE=aI!==null?((aw-aI)*100).toFixed(1):null;
   const hEV=homeOdds&&hI?calcEV(cH,homeOdds):null,aEV=awayOdds&&aI?calcEV(aw,awayOdds):null;
@@ -501,7 +516,7 @@ function NBAResults({results,contextData,awayTeam,homeTeam,awayAbbr,homeAbbr,awa
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.copper,textTransform:"uppercase",marginBottom:10}}>Model Lines</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-          <div style={{background:C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+C.border}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Model Spread</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:C.copper}}>{parseFloat(modelSpread)>=0?homeAbbr+" -"+modelSpread:awayAbbr+" -"+Math.abs(parseFloat(modelSpread)).toFixed(1)}</div>{homeSpread&&(()=>{const delta=parseFloat(modelSpread)+parseFloat(homeSpread);const bigEdge=Math.abs(delta)>=2;const coversTeam=delta>0?homeAbbr:awayAbbr;const edgeColor=delta>0?C.teal:"#f87171";return <div style={{marginTop:6}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,color:bigEdge?edgeColor:C.muted}}>{delta>0?"▲":"▼"} {coversTeam} covers</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>Posted {homeSpread} · Edge: {delta>0?"+":""}{delta.toFixed(1)}pt</div>{bigEdge&&<div style={{fontSize:9,color:C.amber,marginTop:3,letterSpacing:.5,textTransform:"uppercase"}}>Strong edge — {Math.abs(delta).toFixed(1)}pt vs line</div>}</div>;})()}</div>
+          <div style={{background:C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+(tankWarning?"#f87171":""+C.border)}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Model Spread{tankWarning?" ⚠ HIGH VAR":""}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:tankWarning?"#f87171":C.copper}}>{parseFloat(modelSpread)>=0?homeAbbr+" -"+modelSpread:awayAbbr+" -"+Math.abs(parseFloat(modelSpread)).toFixed(1)}</div>{tankWarning&&<div style={{fontSize:9,color:"#f87171",marginTop:2,letterSpacing:.5,textTransform:"uppercase"}}>Lottery team — skip spread bet</div>}{homeSpread&&(()=>{const delta=parseFloat(modelSpread)+parseFloat(homeSpread);const strongEdge=Math.abs(delta)>=3.5;const anyEdge=Math.abs(delta)>=1.5;const coversTeam=delta>0?homeAbbr:awayAbbr;const edgeColor=delta>0?C.teal:"#f87171";return <div style={{marginTop:6}}>{anyEdge?<div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,color:strongEdge?edgeColor:C.muted}}>{delta>0?"▲":"▼"} {coversTeam} covers</div>:<div style={{fontSize:11,color:C.dim,fontStyle:"italic"}}>No clear edge — model aligns with Vegas</div>}<div style={{fontSize:10,color:C.muted,marginTop:2}}>Posted {homeSpread} · Edge: {delta>0?"+":""}{delta.toFixed(1)}pt</div>{strongEdge&&!tankWarning&&<div style={{fontSize:9,color:C.amber,marginTop:3,letterSpacing:.5,textTransform:"uppercase"}}>Strong edge — {Math.abs(delta).toFixed(1)}pt vs line</div>}</div>;})()}</div>
           <div style={{background:totalGapFlag?"#1a0a0a":C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+(totalGapFlag?C.amber+"66":C.border)}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Model Total{totalGapFlag?" ⚠ LOW CONF":""}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:totalGapFlag?C.amber:C.copper}}>{modelTotal} pts</div>{rawModelTotal&&totalGapFlag&&<div style={{fontSize:10,color:C.amber,marginTop:2}}>Raw model: {rawModelTotal} — large gap vs line, avoid total bet</div>}{postedTotal&&<div style={{fontSize:11,color:Math.abs(parseFloat(modelTotal)-parseFloat(postedTotal))>=2?C.teal:C.muted,marginTop:4}}>Posted {postedTotal} - {parseFloat(modelTotal)>parseFloat(postedTotal)?"OVER by "+(parseFloat(modelTotal)-parseFloat(postedTotal)).toFixed(1):"UNDER by "+(parseFloat(postedTotal)-parseFloat(modelTotal)).toFixed(1)}</div>}</div>
         </div>
         {(divGame||altBoost>0||Math.abs(tzAdj)>=0.01||(h2hG&&h2hG.length>=2))&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:contextData?6:0}}>{divGame&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.amber+"18",color:C.amber,border:"1px solid "+C.amber+"44"}}>DIV GAME - tighter line</span>}{altBoost>0&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.copper+"18",color:C.copper,border:"1px solid "+C.copper+"44"}}>ALTITUDE +{(altBoost*100).toFixed(0)}% {homeAbbr}</span>}{tzAdj>0.01&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.teal+"18",color:C.teal,border:"1px solid "+C.teal+"44"}}>TZ ADV +{(tzAdj*100).toFixed(0)}% {homeAbbr}</span>}{tzAdj<-0.01&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:C.teal+"18",color:C.teal,border:"1px solid "+C.teal+"44"}}>TZ ADV +{(Math.abs(tzAdj)*100).toFixed(0)}% {awayAbbr}</span>}{h2hG&&h2hG.length>=2&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#a78bfa18",color:"#a78bfa",border:"1px solid #a78bfa44"}}>H2H: {homeAbbr} {h2hW}-{h2hG.length-h2hW} this season</span>}</div>}

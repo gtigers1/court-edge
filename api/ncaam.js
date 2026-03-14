@@ -81,10 +81,10 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           model: "sonar-pro",
           messages: [
-            { role: "system", content: "You are a sports data API. Search the web for current stats and return only a valid JSON object. No markdown, no code fences, no explanation." },
+            { role: "system", content: "You are a sports data API. Search the web for current stats and return ONLY a raw JSON object. No markdown, no code fences, no explanation, no text before or after the JSON." },
             { role: "user", content: `Search for current 2025-26 NCAA basketball season stats for ${team}. Return this exact JSON schema filled with real data:\n${schema}\n\nRoster - include ALL players below using their EXACT names:\n${playerNames.join(", ")}\n\nRules: wins/losses from current record. ppg/opp = current season averages. tempo from KenPom or Barttorvik. efg_pct as decimal (e.g. 0.52). ranking = AP poll rank (0 if unranked). kenpom_rank = KenPom rank. For each player: ppg/rpg/apg = per game averages this season. role: STAR if ppg>15, KEY if ppg>8, else ROLE. per = ppg*1.1+rpg*0.3+apg*0.4.` }
           ],
-          response_format: { type: "json_object" }
+          temperature: 0.1
         })
       });
       const d = await r.json();
@@ -108,10 +108,13 @@ export default async function handler(req, res) {
     }
 
     let parsed = null;
+    // 1. Direct parse
     try { parsed = JSON.parse(raw); } catch(_) {}
-    if (!parsed) { try { parsed = JSON.parse(raw.replace(/^```json\s*/i,"").replace(/\s*```$/,"")); } catch(_) {} }
+    // 2. Strip markdown code fences
+    if (!parsed) { try { parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i,"").replace(/\s*```\s*$/,"")); } catch(_) {} }
+    // 3. Extract first { ... } block
     if (!parsed) { try { const i=raw.indexOf("{"),j=raw.lastIndexOf("}"); if(i>=0&&j>i) parsed=JSON.parse(raw.slice(i,j+1)); } catch(_) {} }
-    if (!parsed) return res.status(500).json({ error: "Parse failed", espnCount: playerNames.length, raw: raw.slice(0,200) });
+    if (!parsed) return res.status(500).json({ error: "Parse failed — Perplexity returned unexpected format", raw: raw.slice(0,300) });
 
     parsed.wins = parsed.wins || wins;
     parsed.losses = parsed.losses || losses;

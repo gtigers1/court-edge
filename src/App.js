@@ -882,10 +882,35 @@ function ncaamMdlMonteCarlo(h,a,N=10000){
     if(hExp+z1*sig>aExp+z2*sig)w++;}
   return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts`};}
 
-function ncaamConsensus(ps,mkt){
-  // Efficiency gets most weight (most reliable for college)
-  // 15% shrinkage toward 50%  -  college basketball is highly variable
-  const m=Math.min(0.97,Math.max(0.03,[0.28,0.22,0.20,0.13,0.17].reduce((s,w,i)=>s+ps[i]*w,0)));
+// Round-specific weights: early rounds seed/profile matters | Sweet 16+ pure efficiency dominates
+// [AdjEff, Pythagorean, FourFactors, Talent/XFactor, MonteCarlo]
+const TOURNEY_ROUND_W={
+  R64: [0.28,0.22,0.20,0.13,0.17],
+  R32: [0.30,0.20,0.22,0.12,0.16],
+  S16: [0.33,0.17,0.23,0.11,0.16],
+  E8:  [0.35,0.15,0.24,0.10,0.16],
+  F4:  [0.38,0.13,0.25,0.09,0.15],
+  CHAMP:[0.40,0.12,0.25,0.08,0.15],
+};
+const ROUND_LABELS={R64:"Round of 64",R32:"Round of 32",S16:"Sweet 16",E8:"Elite Eight",F4:"Final Four",CHAMP:"Championship"};
+// Historical seed matchup win rates in R64 since 1985
+const SEED_HIST={
+  "1v16":{favWin:99.4,note:"1-seeds: 99.4% all-time"},
+  "2v15":{favWin:93.0,note:"2-seeds: 93.0% all-time"},
+  "3v14":{favWin:85.0,note:"3-seeds: 85.0% all-time"},
+  "4v13":{favWin:79.0,note:"4-seeds: 79.0% all-time"},
+  "5v12":{favWin:64.4,note:"5-seeds: 64.4% — 12s win 35.6%"},
+  "6v11":{favWin:63.1,note:"6-seeds: 63.1% — 11s win 36.9%"},
+  "7v10":{favWin:60.7,note:"7-seeds: 60.7% — 10s win 39.3%"},
+  "8v9": {favWin:51.3,note:"Nearly a coin flip — 51.3% vs 48.7%"},
+};
+function getSeedHist(s1,s2){
+  const lo=Math.min(s1,s2),hi=Math.max(s1,s2);
+  return SEED_HIST[`${lo}v${hi}`]||null;
+}
+function ncaamConsensus(ps,mkt,round="R64"){
+  const w=TOURNEY_ROUND_W[round]||TOURNEY_ROUND_W.R64;
+  const m=Math.min(0.97,Math.max(0.03,w.reduce((s,wi,i)=>s+ps[i]*wi,0)));
   const shrunk=0.5+(m-0.5)*0.85;
   if(mkt===null||mkt===undefined)return shrunk;
   return Math.min(0.97,Math.max(0.03,shrunk*0.67+mkt*0.33));}
@@ -897,6 +922,9 @@ function NCAAMPage(){
   const [homeOdds,setHomeOdds]=useState("");
   const [homeSpread,setHomeSpread]=useState("");
   const [postedTotal,setPostedTotal]=useState("");
+  const [round,setRound]=useState("R64");
+  const [awaySeed,setAwaySeed]=useState("");
+  const [homeSeed,setHomeSeed]=useState("");
   const [awayData,setAwayData]=useState(null);
   const [homeData,setHomeData]=useState(null);
   const [awayLoading,setAwayLoading]=useState(false);
@@ -930,7 +958,7 @@ function NCAAMPage(){
   };
 
   const fetchOdds=async()=>{setOddsLoading(true);setOddsError("");setSharpAlert(null);try{const r=await fetch("/api/odds",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sport:"ncaam",homeTeam:homeTeam?.name||"",awayTeam:awayTeam?.name||""})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Error "+r.status);if(d.homeML)setHomeOdds(d.homeML);if(d.awayML)setAwayOdds(d.awayML);if(d.homeSpread)setHomeSpread(d.homeSpread);if(d.total)setPostedTotal(d.total);if(d.sharpIndicator)setSharpAlert(d.sharpIndicator);if(d.gameTime)setGameTime(d.gameTime);}catch(e){setOddsError(e.message);}setOddsLoading(false);};
-  const resetAll=()=>{setAwayTeam(null);setHomeTeam(null);setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");};
+  const resetAll=()=>{setAwayTeam(null);setHomeTeam(null);setAwayOdds("");setHomeOdds("");setHomeSpread("");setPostedTotal("");setAwayData(null);setHomeData(null);setResults(null);setSharpAlert(null);setGameTime(null);setOddsError("");setAwayError("");setHomeError("");setAwaySeed("");setHomeSeed("");setRound("R64");};
 
   const cyclePlayer=(side,name)=>{
     const [g,s]=side==="home"?[homeData,setHomeData]:[awayData,setAwayData];
@@ -946,7 +974,15 @@ function NCAAMPage(){
       const mkt=devigged(homeOdds,awayOdds);
       const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);
       const modelSpread=(hExpN-aExpN).toFixed(1);const modelTotal=(hExpN+aExpN).toFixed(1);
-      setResults({eff,pyth,ff,tal,mc,mkt,cons:ncaamConsensus([eff.homeProb,pyth.homeProb,ff.homeProb,tal.homeProb,mc.homeProb],mkt),modelSpread,modelTotal});
+      // Cinderella detection: underdog (higher seed) with small KenPom gap vs their seed implies
+      const aSeedN=parseInt(awaySeed)||0,hSeedN=parseInt(homeSeed)||0;
+      const seedGap=Math.abs(aSeedN-hSeedN);
+      const aKP=awayData.kenpom_rank||150,hKP=homeData.kenpom_rank||150;
+      const kpGap=Math.abs(aKP-hKP);
+      // Cinderella: seed 10-12+, but KenPom rank suggests they're much closer than seeding implies
+      const cinderella=aSeedN>=10&&seedGap>=3&&kpGap<(seedGap*8)?{team:awayTeam?.name,seed:aSeedN,kpRank:aKP}
+        :hSeedN>=10&&seedGap>=3&&kpGap<(seedGap*8)?{team:homeTeam?.name,seed:hSeedN,kpRank:hKP}:null;
+      setResults({eff,pyth,ff,tal,mc,mkt,cons:ncaamConsensus([eff.homeProb,pyth.homeProb,ff.homeProb,tal.homeProb,mc.homeProb],mkt,round),modelSpread,modelTotal,round,awaySeed,homeSeed,cinderella});
       setTab("results");setAnalyzing(false);
     },50);
   };
@@ -957,22 +993,44 @@ function NCAAMPage(){
   const homeAbbr=homeTeam?homeTeam.name.split(" ").slice(-1)[0].slice(0,4).toUpperCase():"HME";
 
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
-    {/* Away */}
+    {/* Round Selector */}
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14}}>
+      <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.amber,textTransform:"uppercase",marginBottom:10}}>🏀 Tournament Round</div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        {Object.entries(ROUND_LABELS).map(([k,label])=><button key={k} onClick={()=>setRound(k)} style={{padding:"7px 12px",borderRadius:7,border:"1px solid "+(round===k?C.amber:C.border),background:round===k?C.amber+"22":"transparent",color:round===k?C.amber:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:11,letterSpacing:1,cursor:"pointer",textTransform:"uppercase"}}>{label}</button>)}
+      </div>
+      <div style={{marginTop:8,fontSize:10,color:C.dim}}>
+        {round==="R64"&&"R64: Seed + efficiency both matter — look for under-seeded mid-majors"}
+        {round==="R32"&&"R32: Efficiency starts to dominate — favorites assert control"}
+        {round==="S16"&&"S16: Defense becomes critical — only top-25 AdjDE teams survive"}
+        {round==="E8"&&"E8: Danger round for favorites — 1-seeds go just 47-45 SU here"}
+        {round==="F4"&&"F4: Elite efficiency required — all recent teams above 35 AdjEM"}
+        {round==="CHAMP"&&"Championship: 14/20 recent champions ranked better in offense than defense"}
+      </div>
+    </div>
+
+    {/* Team 1 */}
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12}}>
-      <SectionHeader label="Step 1 - Select Away Team" accent={C.amber} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.amber}/>}/>
+      <SectionHeader label="Step 1 - Select Team 1" accent={C.amber} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.amber}/>}/>
       <div style={{padding:14}}>
-        <TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={awayTeam?.name||""} accent={C.amber} placeholder="Search team or conference..." disabled={awayLoading} onSelect={t=>{setAwayTeam(t);setAwayData(null);setResults(null);fetchTeam(t,"away");}}/>
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+          <div style={{flex:1}}><TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={awayTeam?.name||""} accent={C.amber} placeholder="Search team or conference..." disabled={awayLoading} onSelect={t=>{setAwayTeam(t);setAwayData(null);setResults(null);fetchTeam(t,"away");}}/></div>
+          <div style={{width:64,flexShrink:0}}><div style={{fontSize:9,color:C.muted,letterSpacing:1,marginBottom:3,textTransform:"uppercase"}}>Seed</div><input type="number" min="1" max="16" placeholder="e.g. 5" value={awaySeed} onChange={e=>setAwaySeed(e.target.value)} style={{width:"100%",padding:"9px 8px",background:C.black,border:"1.5px solid "+C.border,borderRadius:7,color:C.amber,fontSize:13,outline:"none",fontFamily:"'Barlow Condensed'",fontWeight:700,textAlign:"center"}}/></div>
+        </div>
         {awayLoading&&awayMsg&&<div style={{marginTop:6,fontSize:11,color:C.amber,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{awayMsg}</span></div>}
         {awayError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{awayError}</div>}
       </div>
       {(awayLoading||awayData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={awayTeam?.name||""} abbr={awayAbbr} teamData={awayData} onCycle={n=>cyclePlayer("away",n)} sport="ncaam" accent={C.amber} loading={awayLoading}/></div>}
     </div>
 
-    {/* Home */}
+    {/* Team 2 */}
     <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12}}>
-      <SectionHeader label="Step 2 - Select Home Team" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
+      <SectionHeader label="Step 2 - Select Team 2" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
       <div style={{padding:14}}>
-        <TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={homeTeam?.name||""} accent={C.copper} placeholder="Search team or conference..." disabled={homeLoading} onSelect={t=>{setHomeTeam(t);setHomeData(null);setResults(null);fetchTeam(t,"home");}}/>
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+          <div style={{flex:1}}><TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={homeTeam?.name||""} accent={C.copper} placeholder="Search team or conference..." disabled={homeLoading} onSelect={t=>{setHomeTeam(t);setHomeData(null);setResults(null);fetchTeam(t,"home");}}/></div>
+          <div style={{width:64,flexShrink:0}}><div style={{fontSize:9,color:C.muted,letterSpacing:1,marginBottom:3,textTransform:"uppercase"}}>Seed</div><input type="number" min="1" max="16" placeholder="e.g. 1" value={homeSeed} onChange={e=>setHomeSeed(e.target.value)} style={{width:"100%",padding:"9px 8px",background:C.black,border:"1.5px solid "+C.border,borderRadius:7,color:C.copper,fontSize:13,outline:"none",fontFamily:"'Barlow Condensed'",fontWeight:700,textAlign:"center"}}/></div>
+        </div>
         {homeLoading&&homeMsg&&<div style={{marginTop:6,fontSize:11,color:C.copper,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{homeMsg}</span></div>}
         {homeError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{homeError}</div>}
       </div>
@@ -980,7 +1038,7 @@ function NCAAMPage(){
     </div>
 
     {bothLoaded&&<div className="fade-in" style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-      <SectionHeader label="Step 3 - Set Odds & Analyze" accent={C.amber}/>
+      <SectionHeader label="Step 3 - Set Odds & Run Tournament Models" accent={C.amber}/>
       <div style={{padding:14}}>
         <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
           <button className="hov-btn" onClick={fetchOdds} disabled={oddsLoading} style={{padding:"8px 16px",background:oddsLoading?C.dim:"linear-gradient(90deg,#1a4a6b,#2a6a9b)",border:"1px solid #2a6a9b",borderRadius:7,cursor:oddsLoading?"not-allowed":"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,letterSpacing:1.5,color:C.white,textTransform:"uppercase",whiteSpace:"nowrap"}}>{oddsLoading?<span className="pulse">Fetching...</span>:"Fetch Live Odds"}</button>
@@ -1012,7 +1070,17 @@ function NCAAMPage(){
 
 function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOdds,homeSpread,postedTotal,tab,setTab,onRecalc}){
   const [copied,setCopied]=useState(false);
-  const {eff,pyth,ff,tal,mc,cons,mkt,modelSpread,modelTotal}=results;const cH=cons,aw=1-cH;
+  const {eff,pyth,ff,tal,mc,cons,mkt,modelSpread,modelTotal,round,awaySeed,homeSeed,cinderella}=results;const cH=cons,aw=1-cH;
+  // Tournament context
+  const aSeedN=parseInt(awaySeed)||0,hSeedN=parseInt(homeSeed)||0;
+  const seedMatchup=aSeedN&&hSeedN?getSeedHist(aSeedN,hSeedN):null;
+  const loSeedN=Math.min(aSeedN||99,hSeedN||99);
+  const hiSeedN=Math.max(aSeedN||0,hSeedN||0);
+  const favTeam=aSeedN&&hSeedN?(aSeedN<hSeedN?awayTeam:homeTeam):"";
+  const favAbbr=aSeedN&&hSeedN?(aSeedN<hSeedN?awayAbbr:homeAbbr):"";
+  const undTeam=aSeedN&&hSeedN?(aSeedN>hSeedN?awayTeam:homeTeam):"";
+  const undAbbr=aSeedN&&hSeedN?(aSeedN>hSeedN?awayAbbr:homeAbbr):"";
+  const roundLabel=ROUND_LABELS[round]||round;
   const hI=oddsToImplied(homeOdds),aI=oddsToImplied(awayOdds);
   const hE=hI!==null?((cH-hI)*100).toFixed(1):null,aE=aI!==null?((aw-aI)*100).toFixed(1):null;
   const hEV=homeOdds&&hI?calcEV(cH,homeOdds):null,aEV=awayOdds&&aI?calcEV(aw,awayOdds):null;
@@ -1025,7 +1093,7 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,home
     <div style={{display:"flex",gap:4,marginBottom:14,background:C.dark,borderRadius:8,padding:4,border:"1px solid "+C.border}}>{[["results","Results"],["method","Methodology"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:"8px 0",borderRadius:6,border:"none",cursor:"pointer",background:tab===k?C.amber+"22":"transparent",color:tab===k?C.amber:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1,textTransform:"uppercase",borderBottom:tab===k?"2px solid "+C.amber:"2px solid transparent"}}>{l}</button>)}</div>
     {tab==="results"&&<>
       <div style={{background:C.card,border:"1.5px solid "+C.amber+"44",borderRadius:12,padding:20,marginBottom:14}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}><div style={{width:3,height:16,borderRadius:2,background:C.amber}}/><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1.5,color:C.white,textTransform:"uppercase"}}>Consensus - 5 College Basketball Models</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}><div style={{width:3,height:16,borderRadius:2,background:C.amber}}/><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1.5,color:C.white,textTransform:"uppercase"}}>March Madness — {roundLabel||"Tournament"} Prediction</span></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:16,alignItems:"center",marginBottom:16}}>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={awayAbbr} size={52} accent={C.amber}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:aw>.55?C.amber:aw>.45?C.copper:C.white}}>{(aw*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{awayTeam}</div></div><OddsPill prob={aw} accent={C.amber}/></div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div><div style={{padding:"6px 10px",background:C.black,border:"1px solid "+C.border,borderRadius:8,textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontSize:10,fontWeight:800,color:agrN>=totN-1?C.amber:agrN>=Math.ceil(totN*0.67)?C.copper:C.muted,letterSpacing:1}}>{agrN}/{totN} AGREE</div>{(aE||hE)&&<div style={{fontFamily:"'Barlow Condensed'",fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1,marginTop:3}}>{sigN(parseFloat(aw>cH?aE:hE),agrN,totN)}</div>}</div></div>
@@ -1039,13 +1107,41 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,home
           <button className="hov-btn" onClick={copyResults} style={{padding:"9px 16px",background:copied?C.amber+"22":"transparent",border:"1px solid "+(copied?C.amber:C.border),borderRadius:7,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,letterSpacing:1,color:copied?C.amber:C.muted,whiteSpace:"nowrap"}}>{copied?"Copied!":"Copy Results"}</button>
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-        <ModelCard icon="AEM" name="Adj. Efficiency" desc="Pts/100 poss margin + KenPom rank/SOS adj" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-eff.homeProb} detail={eff.detail} accent={C.amber}/>
-        <ModelCard icon="PYT" name="Pythagorean" desc="Win quality Pythagorean (exp 11.5) + SOS" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-pyth.homeProb} detail={pyth.detail} accent={C.amber}/>
-        <ModelCard icon="4F" name="Four Factors" desc="Off + Def four factors  -  independent of PPG" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={ff.detail} accent={C.amber}/>
-        <ModelCard icon="TAL" name="Talent Model" desc="Top-3 player PER  -  star power matters most in NCAAM" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-tal.homeProb} detail={tal.detail} accent={C.amber}/>
+      {/* Tournament context: round + seed history + Cinderella */}
+      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:12,marginBottom:10}}>
+        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,letterSpacing:1.5,color:C.amber,textTransform:"uppercase",marginBottom:8}}>🏆 {roundLabel} Context</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {seedMatchup&&<div style={{background:C.black,borderRadius:8,padding:"8px 12px",border:"1px solid "+C.amber+"44",flex:"1 1 180px"}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.amber}}>#{loSeedN} vs #{hiSeedN} Historical</div>
+            <div style={{fontSize:11,color:C.muted,marginTop:3}}>{seedMatchup.note}</div>
+            <div style={{marginTop:6,height:4,borderRadius:2,background:C.border,overflow:"hidden"}}><div style={{width:seedMatchup.favWin+"%",height:"100%",borderRadius:2,background:C.amber}}/></div>
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:3,fontSize:9,color:C.dim}}><span>#{loSeedN} {seedMatchup.favWin}%</span><span>#{hiSeedN} {(100-seedMatchup.favWin).toFixed(1)}%</span></div>
+          </div>}
+          <div style={{background:C.black,borderRadius:8,padding:"8px 12px",border:"1px solid "+C.border,flex:"1 1 160px"}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.amber,textTransform:"uppercase",letterSpacing:.5}}>Round Emphasis</div>
+            {round==="R64"&&<div style={{fontSize:10,color:C.muted,marginTop:3,lineHeight:1.5}}>Seed + AdjEff both matter<br/>Check mid-major KenPom gap</div>}
+            {round==="R32"&&<div style={{fontSize:10,color:C.muted,marginTop:3,lineHeight:1.5}}>Efficiency takes over<br/>Favorites assert control</div>}
+            {round==="S16"&&<div style={{fontSize:10,color:C.muted,marginTop:3,lineHeight:1.5}}>Defense critical — top-25 AdjDE<br/>required to advance</div>}
+            {round==="E8"&&<div style={{fontSize:10,color:C.muted,marginTop:3,lineHeight:1.5}}>Danger round for favorites<br/>1-seeds: 47-45 SU all-time here</div>}
+            {round==="F4"&&<div style={{fontSize:10,color:C.muted,marginTop:3,lineHeight:1.5}}>All 2025 teams above 35 AdjEM<br/>Elite efficiency required</div>}
+            {round==="CHAMP"&&<div style={{fontSize:10,color:C.muted,marginTop:3,lineHeight:1.5}}>14/20 champs: better offense<br/>Every champ: top-40 off, top-25 def</div>}
+          </div>
+          {cinderella&&<div style={{background:"#0d1a0d",borderRadius:8,padding:"8px 12px",border:"1px solid "+C.amber+"88",flex:"1 1 180px"}}>
+            <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:C.amber,textTransform:"uppercase",letterSpacing:.5}}>🔮 Cinderella Alert</div>
+            <div style={{fontSize:11,color:C.amber,marginTop:3,fontWeight:700}}>{cinderella.team} (#{cinderella.seed} seed)</div>
+            <div style={{fontSize:10,color:C.muted,marginTop:2,lineHeight:1.4}}>KenPom #{cinderella.kpRank} — better than seed implies. Classic underdog profile: top-50 KenPom seeded 10-12. The committee underseeds mid-majors.</div>
+          </div>}
+        </div>
       </div>
-      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="8,000 simulated games  -  injury adjusted" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={mc.detail} accent={C.amber}/>
+      {/* Round-weighted model cards */}
+      <div style={{marginBottom:6,fontSize:9,color:C.dim,letterSpacing:.5,textTransform:"uppercase"}}>5 Models — {roundLabel} weighting ({(TOURNEY_ROUND_W[round||"R64"][0]*100).toFixed(0)}% AdjEff / {(TOURNEY_ROUND_W[round||"R64"][2]*100).toFixed(0)}% 4F / {(TOURNEY_ROUND_W[round||"R64"][4]*100).toFixed(0)}% Monte Carlo)</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        <ModelCard icon="AEM" name="Adj. Efficiency" desc="KenPom-style: AdjOE×0.57 + AdjDE×0.43 — #1 long-run predictor" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-eff.homeProb} detail={eff.detail} accent={C.amber}/>
+        <ModelCard icon="PYT" name="Pythagorean + SOS" desc="Win quality (exp 11.5) + schedule-strength adjustment" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-pyth.homeProb} detail={pyth.detail} accent={C.amber}/>
+        <ModelCard icon="4F" name="Four Factors" desc="eFG% 40% · TOV% 25% · OREB% 20% · FTR 15% — Dean Oliver" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={ff.detail} accent={C.amber}/>
+        <ModelCard icon="⭐" name="March X-Factor" desc="Star player PER: top player worth 15+ pts — stars carry in March" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-tal.homeProb} detail={tal.detail} accent={C.amber}/>
+      </div>
+      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="10,000 simulated games — tempo-adjusted scoring with injury impact" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={mc.detail} accent={C.amber}/>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.amber,textTransform:"uppercase",marginBottom:10}}>Model Agreement</div>
         {(()=>{const items=[{l:"Adj Eff",p:1-eff.homeProb},{l:"Pythagorean",p:1-pyth.homeProb},{l:"4 Factors",p:1-ff.homeProb},{l:"Talent",p:1-tal.homeProb},{l:"Monte Carlo",p:1-mc.homeProb}];if(mkt!=null)items.push({l:"Market",p:1-mkt,isMkt:true});return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(62px,1fr))",gap:8}}>{items.map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;const ac=m.isMkt?C.copper:C.amber;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+ac+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:ac}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:ac,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}</div>;})()}
@@ -1452,7 +1548,7 @@ export default function App(){
     </div>
     <div style={{background:"linear-gradient(90deg,"+ct.accent+"18,transparent)",borderBottom:"1px solid "+C.border,padding:"8px 16px"}}>
       <div style={{maxWidth:1040,margin:"0 auto",display:"flex",alignItems:"center",gap:10,overflow:"hidden"}}>
-        <span className="hdr-title" style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:18,color:ct.accent,letterSpacing:2,whiteSpace:"nowrap"}}>{ct.label==="NBA"?"NBA MONEYLINE ANALYZER":ct.label==="NHL"?"NHL MONEYLINE ANALYZER":ct.label==="NCAAM"?"NCAAM MONEYLINE ANALYZER":ct.label==="PGA"?"PGA PLAYERS MODEL":"NBA DAILY PICKS"}</span>
+        <span className="hdr-title" style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:18,color:ct.accent,letterSpacing:2,whiteSpace:"nowrap"}}>{ct.label==="NBA"?"NBA MONEYLINE ANALYZER":ct.label==="NHL"?"NHL MONEYLINE ANALYZER":ct.label==="NCAAM"?"NCAA TOURNAMENT PREDICTOR":ct.label==="PGA"?"PGA PLAYERS MODEL":"NBA DAILY PICKS"}</span>
         <span className="hdr-sub" style={{fontSize:11,color:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ct.sub}</span>
       </div>
     </div>

@@ -778,16 +778,16 @@ const NCAAM_TEAMS=[
   {name:"Richmond Spiders",id:"257",conf:"A-10"},{name:"Saint Joseph's Hawks",id:"2603",conf:"A-10"},
 ].sort((a,b)=>a.name.localeCompare(b.name));
 
-function ncaamMdlEfficiency(h,a){
+function ncaamMdlEfficiency(h,a,neutral=true){
   // Adjusted efficiency per 100 possessions  -  what KenPom actually measures
   // Normalizing by tempo removes pace bias completely
   const hOff=h.ppg/Math.max(h.tempo,55)*100;
   const aDef=a.opp/Math.max(a.tempo,55)*100; // opp's pts ALLOWED per 100
   const aOff=a.ppg/Math.max(a.tempo,55)*100;
   const hDef=h.opp/Math.max(h.tempo,55)*100;
-  // Game efficiency margin: offense vs opponent defense
-  const hEM=hOff-aDef; // How much better H offense is vs A defense, per 100
-  const aEM=aOff-hDef;
+  // Self-contained net efficiency: compare each team vs their own schedule
+  const hNet=(h.ppg-h.opp)/Math.max(h.tempo,55)*100;
+  const aNet=(a.ppg-a.opp)/Math.max(a.tempo,55)*100;
   // KenPom rank provides schedule-strength correction
   const hRank=Math.min(h.kenpom_rank||150,350);
   const aRank=Math.min(a.kenpom_rank||150,350);
@@ -795,12 +795,13 @@ function ncaamMdlEfficiency(h,a){
   const aRankAdj=(175-aRank)*0.03;
   const hInj=injPen(h.roster,0.10,0.05,0.015);
   const aInj=injPen(a.roster,0.10,0.05,0.015);
-  // HCA 3.5 pts per 100 poss at home  -  empirically ~3.5 for college
-  const diff=(hEM+hRankAdj)-(aEM+aRankAdj)+3.5-(hInj-aInj)*22;
-  const p=logistic(diff*0.075);
-  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hEM:((hEM+hRankAdj)).toFixed(1),aEM:((aEM+aRankAdj)).toFixed(1),detail:`H AdjEM ${((hEM+hRankAdj)).toFixed(1)}  A AdjEM ${((aEM+aRankAdj)).toFixed(1)}`};}
+  // Tournament = neutral site (no HCA); regular season = +3.5 HCA
+  const hca=neutral?0:3.5;
+  const diff=(hNet+hRankAdj)-(aNet+aRankAdj)+hca-(hInj-aInj)*22;
+  const p=logistic(diff*0.10);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hEM:((hNet+hRankAdj)).toFixed(1),aEM:((aNet+aRankAdj)).toFixed(1),detail:`H AdjEM ${((hNet+hRankAdj)).toFixed(1)}  A AdjEM ${((aNet+aRankAdj)).toFixed(1)}`};}
 
-function ncaamMdlPythagorean(h,a){
+function ncaamMdlPythagorean(h,a,neutral=true){
   // Win quality  -  Pythagorean win% with conference adjustment
   // Exponent 11.5 = empirically best for college basketball
   const hP=pythagorean(h.ppg,h.opp,11.5);
@@ -810,14 +811,15 @@ function ncaamMdlPythagorean(h,a){
   const aSOS=Math.max(0.90,Math.min(1.10,1+(175-Math.min(a.kenpom_rank||150,350))*0.0015));
   const hQ=Math.min(0.97,hP*hSOS);
   const aQ=Math.min(0.97,aP*aSOS);
-  const hHCA=pythagorean(h.ppg+3.5,h.opp,11.5);
-  const hAdj=hQ*0.65+hHCA*0.35;
+  // Neutral site: no HCA boost; home game: +3.5pt
+  const hAdj=neutral?hQ:Math.min(0.97,hQ*0.65+pythagorean(h.ppg+3.5,h.opp,11.5)*0.35);
   const hi=injPen(h.roster,0.10,0.05,0.015);
   const ai=injPen(a.roster,0.10,0.05,0.015);
   const p=log5(Math.max(0.03,hAdj-hi),Math.max(0.03,aQ-ai));
-  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hQ:(hQ*100).toFixed(1),aQ:(aQ*100).toFixed(1),detail:`H Pyth ${(hQ*100).toFixed(1)}%  A Pyth ${(aQ*100).toFixed(1)}%  +3.5pt HCA`};}
+  const siteNote=neutral?"neutral site":"home +3.5pt";
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hQ:(hQ*100).toFixed(1),aQ:(aQ*100).toFixed(1),detail:`H Pyth ${(hQ*100).toFixed(1)}%  A Pyth ${(aQ*100).toFixed(1)}%  ${siteNote}`};}
 
-function ncaamMdlFourFactors(h,a){
+function ncaamMdlFourFactors(h,a,neutral=true){
   // Offensive + defensive four factors  -  independent from PPG signal
   const offFF=d=>{
     const efg=(d.efg_pct||0.50)*0.40;
@@ -838,11 +840,12 @@ function ncaamMdlFourFactors(h,a){
   const aTotal=aOff*0.55+aDef*0.45;
   const hi=injPen(h.roster,0.06,0.03,0.008);
   const ai=injPen(a.roster,0.06,0.03,0.008);
-  // HCA small FF boost: home teams get ~1% eFG boost
-  const p=logistic((hTotal-aTotal)*7+0.28-(hi-ai)*3);
+  // Neutral site: no HCA; home: ~1% eFG boost (+0.28 logistic offset)
+  const hca=neutral?0:0.28;
+  const p=logistic((hTotal-aTotal)*7+hca-(hi-ai)*3);
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hFF:hOff.toFixed(3),aFF:aOff.toFixed(3),detail:`H Off FF: ${hOff.toFixed(3)}  A Off FF: ${aOff.toFixed(3)}`};}
 
-function ncaamMdlTalent(h,a){
+function ncaamMdlTalent(h,a,neutral=true){
   // Star player talent differential  -  entirely different signal from team stats
   // In college a single star can be worth 15+ points to a team
   const sortH=[...(h.roster||[])].sort((x,y)=>(y.per||0)-(x.per||0));
@@ -856,11 +859,12 @@ function ncaamMdlTalent(h,a){
       return s+(p.per||10)*wi*avail;
     },0);};
   const hV=score(sortH),aV=score(sortA);
-  // HCA in college: home crowd especially impacts road stars negatively
-  const p=logistic((hV-aV)*0.12+0.30);
+  // Neutral site: stars play equally; home court suppresses road star impact
+  const hca=neutral?0:0.30;
+  const p=logistic((hV-aV)*0.12+hca);
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hVal:hV.toFixed(1),aVal:aV.toFixed(1),detail:`H talent: ${hV.toFixed(1)}  A talent: ${aV.toFixed(1)}`};}
 
-function ncaamMdlMonteCarlo(h,a,N=10000){
+function ncaamMdlMonteCarlo(h,a,N=10000,neutral=true){
   // Tempo-aware point simulation
   const hi=injPen(h.roster,0.11,0.055,0.013);
   const ai=injPen(a.roster,0.11,0.055,0.013);
@@ -872,7 +876,9 @@ function ncaamMdlMonteCarlo(h,a,N=10000){
   const aDef=(h.opp/Math.max(h.tempo,55))*gamePace;
   // Rest penalty: back-to-back costs ~2.5pts in college basketball
   const restPenN=d=>Math.max(0,(2-Math.min(d??2,2))*1.25);
-  const hExp=(hOff*0.55+hDef*0.45)+1.8-restPenN(h.rest);
+  // Neutral site: no home court boost; regular season: +1.8pt
+  const hca=neutral?0:1.8;
+  const hExp=(hOff*0.55+hDef*0.45)+hca-restPenN(h.rest);
   const aExp=(aOff*0.55+aDef*0.45)-restPenN(a.rest);
   const sig=10; // NCAAM game SD ~10 pts per team
   let w=0;
@@ -880,17 +886,69 @@ function ncaamMdlMonteCarlo(h,a,N=10000){
     const z1=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
     const z2=Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());
     if(hExp+z1*sig>aExp+z2*sig)w++;}
-  return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts`};}
+  return{homeProb:Math.min(0.97,Math.max(0.03,w/N)),hExp:hExp.toFixed(1),aExp:aExp.toFixed(1),detail:`Proj: H ${hExp.toFixed(1)}  A ${aExp.toFixed(1)} pts (neutral)`};}
+
+// Model 6: Net Rating (LRMC-inspired — absolute margin + SOS, no tempo normalization)
+// The Georgia Tech LRMC model uses raw margin of victory adjusted for home court and opponent strength.
+// Our version: (ppg - opp) adjusted by KenPom rank SOS. Different from AdjEff (no tempo normalization).
+function ncaamMdlNetRating(h,a){
+  const hNet=h.ppg-h.opp;
+  const aNet=a.ppg-a.opp;
+  // SOS via KenPom rank: rank 1 = +2.5pts, rank 175 = 0, rank 350 = -2.5
+  const hSOS=(175-Math.min(h.kenpom_rank||150,350))*0.014;
+  const aSOS=(175-Math.min(a.kenpom_rank||150,350))*0.014;
+  const hAdj=hNet+hSOS,aAdj=aNet+aSOS;
+  const diff=hAdj-aAdj;
+  const p=logistic(diff*0.11);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hAdj:hAdj.toFixed(1),aAdj:aAdj.toFixed(1),detail:`H net: ${hAdj.toFixed(1)} ppg  A net: ${aAdj.toFixed(1)} ppg`};}
+
+// Model 7: Historical Seed Anchor (Bayesian prior from 40 years of tournament data)
+// R64 seed matchup historical rates are strong priors; shift toward KenPom when ranks disagree.
+// Weight falls off sharply in later rounds as small-sample upsets accumulate.
+function ncaamMdlSeedAnchor(h,a,awaySeed,homeSeed){
+  const aN=parseInt(awaySeed)||8,hN=parseInt(homeSeed)||8;
+  const seedData=getSeedHist(aN,hN);
+  const aKP=a.kenpom_rank||150,hKP=h.kenpom_rank||150;
+  let seedProb=0.5;
+  if(seedData){
+    // Lower seed # = historical favorite
+    seedProb=hN<aN?seedData.favWin/100:1-seedData.favWin/100;
+  }
+  // KenPom rank gap shifts probability toward the better-ranked team
+  // kpGap > 0 means home team's rank is worse (higher number = worse)
+  const kpGap=hKP-aKP; // positive = home worse
+  const kpAdj=Math.tanh(-kpGap/60)*0.18; // max ±18% KenPom correction
+  const blended=Math.min(0.95,Math.max(0.05,seedProb+kpAdj));
+  return{homeProb:blended,seedProb:(seedProb*100).toFixed(1),kpAdj:kpAdj,detail:`Seed hist: ${(seedProb*100).toFixed(1)}%  KP adj: ${kpAdj>=0?"+":""}${(kpAdj*100).toFixed(1)}%`};}
+
+// Model 8: Luck-Adjusted Pythagorean (KenPom luck regression)
+// Teams whose actual W-L significantly exceeds their Pythagorean expectation have been lucky
+// in close games. Research shows ~60-70% regression to Pythagorean in tournament play.
+function ncaamMdlLuckAdjusted(h,a){
+  const hPyth=pythagorean(h.ppg,h.opp,11.5);
+  const aPyth=pythagorean(a.ppg,a.opp,11.5);
+  const hGames=Math.max((h.wins||0)+(h.losses||0),1);
+  const aGames=Math.max((a.wins||0)+(a.losses||0),1);
+  const hActual=hGames>1?(h.wins||0)/hGames:hPyth;
+  const aActual=aGames>1?(a.wins||0)/aGames:aPyth;
+  // Luck: positive = overperforming (will regress); regress 65% toward Pythagorean
+  const hAdj=hPyth*0.65+hActual*0.35;
+  const aAdj=aPyth*0.65+aActual*0.35;
+  const hi=injPen(h.roster,0.08,0.04,0.010);
+  const ai=injPen(a.roster,0.08,0.04,0.010);
+  const p=log5(Math.max(0.03,hAdj-hi),Math.max(0.03,aAdj-ai));
+  const hLuck=(hActual-hPyth)*100,aLuck=(aActual-aPyth)*100;
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hPyth:(hPyth*100).toFixed(1),aPyth:(aPyth*100).toFixed(1),hLuck:hLuck.toFixed(1),aLuck:aLuck.toFixed(1),detail:`H Pyth ${(hPyth*100).toFixed(1)}% luck${hLuck>=0?"+":""}${hLuck.toFixed(1)}%  A Pyth ${(aPyth*100).toFixed(1)}% luck${aLuck>=0?"+":""}${aLuck.toFixed(1)}%`};}
 
 // Round-specific weights: early rounds seed/profile matters | Sweet 16+ pure efficiency dominates
-// [AdjEff, Pythagorean, FourFactors, Talent/XFactor, MonteCarlo]
+// [AdjEff, Pythagorean, FourFactors, Talent, MonteCarlo, NetRating, SeedAnchor, LuckAdj]
 const TOURNEY_ROUND_W={
-  R64: [0.28,0.22,0.20,0.13,0.17],
-  R32: [0.30,0.20,0.22,0.12,0.16],
-  S16: [0.33,0.17,0.23,0.11,0.16],
-  E8:  [0.35,0.15,0.24,0.10,0.16],
-  F4:  [0.38,0.13,0.25,0.09,0.15],
-  CHAMP:[0.40,0.12,0.25,0.08,0.15],
+  R64: [0.22,0.15,0.17,0.09,0.14,0.12,0.08,0.03],
+  R32: [0.24,0.14,0.18,0.09,0.14,0.12,0.06,0.03],
+  S16: [0.27,0.13,0.19,0.09,0.14,0.11,0.04,0.03],
+  E8:  [0.29,0.12,0.20,0.08,0.15,0.11,0.02,0.03],
+  F4:  [0.32,0.11,0.21,0.07,0.16,0.10,0.00,0.03],
+  CHAMP:[0.34,0.10,0.22,0.06,0.17,0.09,0.00,0.02],
 };
 const ROUND_LABELS={R64:"Round of 64",R32:"Round of 32",S16:"Sweet 16",E8:"Elite Eight",F4:"Final Four",CHAMP:"Championship"};
 // Historical seed matchup win rates in R64 since 1985
@@ -910,7 +968,10 @@ function getSeedHist(s1,s2){
 }
 function ncaamConsensus(ps,mkt,round="R64"){
   const w=TOURNEY_ROUND_W[round]||TOURNEY_ROUND_W.R64;
-  const m=Math.min(0.97,Math.max(0.03,w.reduce((s,wi,i)=>s+ps[i]*wi,0)));
+  // Sum only weights for models that have valid probabilities (ps may be shorter in some code paths)
+  const totalW=w.slice(0,ps.length).reduce((s,wi)=>s+wi,0)||1;
+  const weighted=w.slice(0,ps.length).reduce((s,wi,i)=>s+ps[i]*(wi/totalW),0);
+  const m=Math.min(0.97,Math.max(0.03,weighted));
   const shrunk=0.5+(m-0.5)*0.85;
   if(mkt===null||mkt===undefined)return shrunk;
   return Math.min(0.97,Math.max(0.03,shrunk*0.67+mkt*0.33));}
@@ -965,7 +1026,15 @@ function NCAAMPage(){
     if(!homeData||!awayData)return;
     setAnalyzing(true);
     setTimeout(()=>{
-      const eff=ncaamMdlEfficiency(homeData,awayData),pyth=ncaamMdlPythagorean(homeData,awayData),ff=ncaamMdlFourFactors(homeData,awayData),tal=ncaamMdlTalent(homeData,awayData),mc=ncaamMdlMonteCarlo(homeData,awayData);
+      // All tournament games are at neutral sites — no home court advantage
+      const eff=ncaamMdlEfficiency(homeData,awayData,true);
+      const pyth=ncaamMdlPythagorean(homeData,awayData,true);
+      const ff=ncaamMdlFourFactors(homeData,awayData,true);
+      const tal=ncaamMdlTalent(homeData,awayData,true);
+      const mc=ncaamMdlMonteCarlo(homeData,awayData,10000,true);
+      const nr=ncaamMdlNetRating(homeData,awayData);
+      const sa=ncaamMdlSeedAnchor(homeData,awayData,awaySeed,homeSeed);
+      const la=ncaamMdlLuckAdjusted(homeData,awayData);
       const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);
       const modelSpread=(hExpN-aExpN).toFixed(1);const modelTotal=(hExpN+aExpN).toFixed(1);
       // Cinderella detection: underdog (higher seed) with small KenPom gap vs their seed implies
@@ -976,7 +1045,8 @@ function NCAAMPage(){
       // Cinderella: seed 10-12+, but KenPom rank suggests they're much closer than seeding implies
       const cinderella=aSeedN>=10&&seedGap>=3&&kpGap<(seedGap*8)?{team:awayTeam?.name,seed:aSeedN,kpRank:aKP}
         :hSeedN>=10&&seedGap>=3&&kpGap<(seedGap*8)?{team:homeTeam?.name,seed:hSeedN,kpRank:hKP}:null;
-      setResults({eff,pyth,ff,tal,mc,cons:ncaamConsensus([eff.homeProb,pyth.homeProb,ff.homeProb,tal.homeProb,mc.homeProb],null,round),modelSpread,modelTotal,round,awaySeed,homeSeed,cinderella});
+      const allProbs=[eff.homeProb,pyth.homeProb,ff.homeProb,tal.homeProb,mc.homeProb,nr.homeProb,sa.homeProb,la.homeProb];
+      setResults({eff,pyth,ff,tal,mc,nr,sa,la,cons:ncaamConsensus(allProbs,null,round),modelSpread,modelTotal,round,awaySeed,homeSeed,cinderella});
       setTab("results");setAnalyzing(false);
     },50);
   };
@@ -1043,19 +1113,20 @@ function NCAAMPage(){
 
 function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,tab,setTab,onRecalc}){
   const [copied,setCopied]=useState(false);
-  const {eff,pyth,ff,tal,mc,cons,modelSpread,modelTotal,round,awaySeed,homeSeed,cinderella}=results;const cH=cons,aw=1-cH;
+  const {eff,pyth,ff,tal,mc,nr,sa,la,cons,modelSpread,modelTotal,round,awaySeed,homeSeed,cinderella}=results;const cH=cons,aw=1-cH;
   // Tournament context — no betting data needed
   const aSeedN=parseInt(awaySeed)||0,hSeedN=parseInt(homeSeed)||0;
   const seedMatchup=aSeedN&&hSeedN?getSeedHist(aSeedN,hSeedN):null;
   const loSeedN=Math.min(aSeedN||99,hSeedN||99);
   const hiSeedN=Math.max(aSeedN||0,hSeedN||0);
   const roundLabel=ROUND_LABELS[round]||round;
-  // Model agreement — pure stats, 5 models
-  const allPs=[eff.homeProb,pyth.homeProb,ff.homeProb,tal.homeProb,mc.homeProb];
+  // Model agreement — 8 models, no market data for tournament
+  const allPs=[eff,pyth,ff,tal,mc,nr,sa,la].filter(Boolean).map(m=>m.homeProb);
+  const totalModels=allPs.length;
   const favH=cH>0.5;
   const agrN=allPs.filter(p=>favH?p>0.5:p<0.5).length;
-  const advSignal=agrN>=5?"UNANIMOUS":agrN>=4?"STRONG PICK":agrN>=3?"SLIGHT EDGE":"MODELS SPLIT";
-  const advColor=agrN>=5?C.amber:agrN>=4?C.teal:agrN>=3?C.copper:C.muted;
+  const advSignal=agrN>=totalModels?"UNANIMOUS":agrN>=Math.ceil(totalModels*0.75)?"STRONG PICK":agrN>=Math.ceil(totalModels*0.5)?"SLIGHT EDGE":"MODELS SPLIT";
+  const advColor=agrN>=totalModels?C.amber:agrN>=Math.ceil(totalModels*0.75)?C.teal:agrN>=Math.ceil(totalModels*0.5)?C.copper:C.muted;
   const copyResults=()=>{
     const winner=cH>aw?homeTeam:awayTeam;
     const winnerPct=cH>aw?(cH*100).toFixed(1):(aw*100).toFixed(1);
@@ -1064,7 +1135,7 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,tab,setTab,on
       `${awayTeam}${aSeedN?" (#"+aSeedN+")":""} vs ${homeTeam}${hSeedN?" (#"+hSeedN+")":""}`,
       `Prediction: ${winner} advances (${winnerPct}%)`,
       `${awayAbbr} ${(aw*100).toFixed(1)}% | ${homeAbbr} ${(cH*100).toFixed(1)}%`,
-      `Model agreement: ${agrN}/5 — ${advSignal}`,
+      `Model agreement: ${agrN}/${totalModels} — ${advSignal}`,
       modelTotal?`Projected score: ${modelTotal} pts total`:null,
       cinderella?`⚠ Cinderella Alert: ${cinderella.team} (KenPom #${cinderella.kpRank})`:null,
     ].filter(Boolean).join("\n");
@@ -1077,11 +1148,11 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,tab,setTab,on
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}><div style={{width:3,height:16,borderRadius:2,background:C.amber}}/><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:14,letterSpacing:1.5,color:C.white,textTransform:"uppercase"}}>March Madness — {roundLabel||"Tournament"} Prediction</span></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:16,alignItems:"center",marginBottom:16}}>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={awayAbbr} size={52} accent={C.amber}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:aw>.55?C.amber:aw>.45?C.copper:C.white}}>{(aw*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{awayTeam}</div></div><OddsPill prob={aw} accent={C.amber}/></div>
-          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div><div style={{padding:"6px 10px",background:C.black,border:"1px solid "+C.border,borderRadius:8,textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontSize:10,fontWeight:800,color:agrN>=4?C.amber:agrN>=3?C.copper:C.muted,letterSpacing:1}}>{agrN}/5 AGREE</div><div style={{fontFamily:"'Barlow Condensed'",fontSize:11,fontWeight:800,color:advColor,letterSpacing:1,marginTop:3}}>{advSignal}</div></div></div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:14,color:C.muted,letterSpacing:2}}>VS</div><div style={{padding:"6px 10px",background:C.black,border:"1px solid "+C.border,borderRadius:8,textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontSize:10,fontWeight:800,color:agrN>=Math.ceil(totalModels*0.75)?C.amber:agrN>=Math.ceil(totalModels*0.5)?C.copper:C.muted,letterSpacing:1}}>{agrN}/{totalModels} AGREE</div><div style={{fontFamily:"'Barlow Condensed'",fontSize:11,fontWeight:800,color:advColor,letterSpacing:1,marginTop:3}}>{advSignal}</div></div></div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><Badge abbr={homeAbbr} size={52} accent={C.amber}/><div style={{textAlign:"center"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:42,lineHeight:1,color:cH>.55?C.amber:cH>.45?C.copper:C.white}}>{(cH*100).toFixed(1)}%</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{homeTeam}</div></div><OddsPill prob={cH} accent={C.amber}/></div>
         </div>
         <WinBar awayProb={aw} awayAbbr={awayAbbr} homeAbbr={homeAbbr} accent={C.amber}/>
-        <div style={{marginTop:10,padding:"8px 12px",background:C.black,border:"1px solid "+advColor+"44",borderRadius:8,textAlign:"center"}}><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:advColor,letterSpacing:1}}>{advSignal}</span><span style={{fontSize:11,color:C.muted,marginLeft:8}}>{agrN}/5 models favor {cH>aw?homeTeam:awayTeam}</span></div>
+        <div style={{marginTop:10,padding:"8px 12px",background:C.black,border:"1px solid "+advColor+"44",borderRadius:8,textAlign:"center"}}><span style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,color:advColor,letterSpacing:1}}>{advSignal}</span><span style={{fontSize:11,color:C.muted,marginLeft:8}}>{agrN}/{totalModels} models favor {cH>aw?homeTeam:awayTeam}</span></div>
         <div style={{display:"flex",gap:8,marginTop:12}}>
           <button className="hov-btn" onClick={onRecalc} style={{flex:1,padding:"9px 0",background:"transparent",border:"1px solid "+C.border,borderRadius:7,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.muted,textTransform:"uppercase"}}>Recalculate with Updated Injuries</button>
           <button className="hov-btn" onClick={copyResults} style={{padding:"9px 16px",background:copied?C.amber+"22":"transparent",border:"1px solid "+(copied?C.amber:C.border),borderRadius:7,cursor:"pointer",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,letterSpacing:1,color:copied?C.amber:C.muted,whiteSpace:"nowrap"}}>{copied?"Copied!":"Copy Results"}</button>
@@ -1113,18 +1184,31 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,tab,setTab,on
           </div>}
         </div>
       </div>
-      {/* Round-weighted model cards */}
-      <div style={{marginBottom:6,fontSize:9,color:C.dim,letterSpacing:.5,textTransform:"uppercase"}}>5 Models — {roundLabel} weighting ({(TOURNEY_ROUND_W[round||"R64"][0]*100).toFixed(0)}% AdjEff / {(TOURNEY_ROUND_W[round||"R64"][2]*100).toFixed(0)}% 4F / {(TOURNEY_ROUND_W[round||"R64"][4]*100).toFixed(0)}% Monte Carlo)</div>
+      {/* Round-weighted model cards — 8 models */}
+      <div style={{marginBottom:6,fontSize:9,color:C.dim,letterSpacing:.5,textTransform:"uppercase"}}>8 Models — {roundLabel} weighting ({(TOURNEY_ROUND_W[round||"R64"][0]*100).toFixed(0)}% AdjEff / {(TOURNEY_ROUND_W[round||"R64"][2]*100).toFixed(0)}% 4F / {(TOURNEY_ROUND_W[round||"R64"][4]*100).toFixed(0)}% MC / {(TOURNEY_ROUND_W[round||"R64"][5]*100).toFixed(0)}% NetRtg)</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-        <ModelCard icon="AEM" name="Adj. Efficiency" desc="KenPom-style: AdjOE×0.57 + AdjDE×0.43 — #1 long-run predictor" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-eff.homeProb} detail={eff.detail} accent={C.amber}/>
-        <ModelCard icon="PYT" name="Pythagorean + SOS" desc="Win quality (exp 11.5) + schedule-strength adjustment" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-pyth.homeProb} detail={pyth.detail} accent={C.amber}/>
+        <ModelCard icon="AEM" name="Adj. Efficiency" desc="Self-contained net rating per 100 poss + KenPom SOS — #1 predictor" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-eff.homeProb} detail={eff.detail} accent={C.amber}/>
+        <ModelCard icon="PYT" name="Pythagorean + SOS" desc="Win quality (exp 11.5) + schedule-strength · luck-adjusted" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-pyth.homeProb} detail={pyth.detail} accent={C.amber}/>
         <ModelCard icon="4F" name="Four Factors" desc="eFG% 40% · TOV% 25% · OREB% 20% · FTR 15% — Dean Oliver" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-ff.homeProb} detail={ff.detail} accent={C.amber}/>
         <ModelCard icon="⭐" name="March X-Factor" desc="Star player PER: top player worth 15+ pts — stars carry in March" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-tal.homeProb} detail={tal.detail} accent={C.amber}/>
+        <ModelCard icon="MC" name="Monte Carlo" desc="10,000 simulated games — tempo-adjusted, neutral site, injury impact" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={mc.detail} accent={C.amber}/>
+        <ModelCard icon="NR" name="Net Rating (LRMC)" desc="Absolute net margin + SOS — Georgia Tech LRMC approach, 74% accuracy" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-nr.homeProb} detail={nr.detail} accent={C.amber}/>
+        <ModelCard icon="SA" name="Seed Anchor" desc="40 years of matchup data + KenPom rank divergence correction" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-sa.homeProb} detail={sa.detail} accent={C.amber}/>
+        <ModelCard icon="LK" name="Luck Adjusted" desc="Regresses W-L toward Pythagorean expectation — tournament teams can't hide luck" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-la.homeProb} detail={la.detail} accent={C.amber}/>
       </div>
-      <ModelCard icon="MC" name="Monte Carlo Simulation" desc="10,000 simulated games — tempo-adjusted scoring with injury impact" awayTeam={awayTeam} homeTeam={homeTeam} awayAbbr={awayAbbr} homeAbbr={homeAbbr} awayProb={1-mc.homeProb} detail={mc.detail} accent={C.amber}/>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.amber,textTransform:"uppercase",marginBottom:10}}>Model Agreement</div>
-        {(()=>{const items=[{l:"Adj Eff",p:1-eff.homeProb},{l:"Pythagorean",p:1-pyth.homeProb},{l:"4 Factors",p:1-ff.homeProb},{l:"Talent",p:1-tal.homeProb},{l:"Monte Carlo",p:1-mc.homeProb}];if(mkt!=null)items.push({l:"Market",p:1-mkt,isMkt:true});return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(62px,1fr))",gap:8}}>{items.map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;const ac=m.isMkt?C.copper:C.amber;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+ac+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:ac}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:ac,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}</div>;})()}
+        {(()=>{
+          const items=[
+            {l:"Adj Eff",p:1-eff.homeProb},{l:"Pythagorean",p:1-pyth.homeProb},
+            {l:"4 Factors",p:1-ff.homeProb},{l:"Talent",p:1-tal.homeProb},
+            {l:"Monte Carlo",p:1-mc.homeProb},
+            ...(nr?[{l:"Net Rating",p:1-nr.homeProb}]:[]),
+            ...(sa?[{l:"Seed Hist",p:1-sa.homeProb}]:[]),
+            ...(la?[{l:"Luck Adj",p:1-la.homeProb}]:[]),
+          ];
+          return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(62px,1fr))",gap:8}}>{items.map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+C.amber+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.amber}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:C.amber,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}</div>;
+        })()}
       </div>
       {modelSpread!=null&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
         <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.amber,textTransform:"uppercase",marginBottom:10}}>Model Lines</div>
@@ -1134,9 +1218,18 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,tab,setTab,on
           <div style={{background:C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+C.border}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Projected Score</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:16,color:C.amber,lineHeight:1.4}}>{awayAbbr} {mc.aExp}<br/>{homeAbbr} {mc.hExp}</div></div>
         </div>
       </div>}
-      <BestBets results={results} awayTeam={awayTeam} homeTeam={homeTeam} sport="ncaam" accent={C.amber}/>
     </>}
-    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["AEM","Adj Efficiency (28%)","Pts per 100 possessions: offense vs opponent defense. KenPom rank adjusts for schedule strength. +3.5pt HCA."],["PYT","Pythagorean (22%)","Win quality Pythagorean (exp 11.5) with SOS multiplier from KenPom rank. Log5 head-to-head."],["4F","Four Factors (20%)","Offensive (55%) + Defensive (45%) four factors. Entirely independent from PPG signal."],["TAL","Talent Model (13%)","Top-3 player PER weighted by availability. College star impact is larger than NBA. OUT=0%, DOUBTFUL=15%."],["MC","Monte Carlo (17%)","10,000 tempo-adjusted simulations. Game pace = avg of both teams. sigma=10pts per team."],["W","Consensus","Adj Eff 28% + Pythagorean 22% + Four Factors 20% + Talent 13% + Monte Carlo 17%."]].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.amber+"22",border:"1px solid "+C.amber+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.amber,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.amber,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
+    {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[
+      ["AEM","Adj. Efficiency (22%)","Self-contained net rating per 100 possessions, adjusted by KenPom rank SOS. Neutral site — no HCA. #1 long-run predictor per research."],
+      ["PYT","Pythagorean (15%)","Win quality Pythagorean exp 11.5 × SOS. No home court at neutral site. Log5 head-to-head matchup."],
+      ["4F","Four Factors (17%)","eFG% 40% · TOV% 25% · OREB% 20% · FTR 15% — Dean Oliver's four factors framework."],
+      ["TAL","March X-Factor (9%)","Top-3 player PER weighted by availability. College star impact > NBA. OUT=0%, DOUBTFUL=15%."],
+      ["MC","Monte Carlo (14%)","10,000 neutral-site simulations. Game pace = avg of both teams. sigma=10 pts. Injury-adjusted."],
+      ["NR","Net Rating LRMC (12%)","Georgia Tech LRMC-inspired: absolute net margin (ppg−opp) adjusted by KenPom SOS rank. ~74% historical accuracy."],
+      ["SA","Seed Anchor (8%)","40 years of R64 seed matchup win rates as Bayesian prior. KenPom rank gap shifts probability. Weight drops in later rounds."],
+      ["LK","Luck Adjusted (3%)","Regresses actual W-L 65% toward Pythagorean expectation. Teams lucky in close games (out-performing Pythag) regress in tournament."],
+      ["W","8-Model Consensus","R64: AdjEff 22%+Pyth 15%+4F 17%+Talent 9%+MC 14%+NetRtg 12%+Seed 8%+Luck 3%. All games treated as neutral site."]
+    ].map(([icon,n,d])=><div key={n} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:16}}><div style={{width:32,height:32,borderRadius:6,background:C.amber+"22",border:"1px solid "+C.amber+"44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontFamily:"'Barlow Condensed'",fontWeight:900,color:C.amber,marginBottom:8}}>{icon}</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,color:C.amber,marginBottom:6}}>{n}</div><div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>{d}</div></div>)}</div>}
   </div>;
 }
 

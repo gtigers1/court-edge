@@ -1192,7 +1192,7 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,tab,setTab,on
   const hiSeedN=Math.max(aSeedN||0,hSeedN||0);
   const roundLabel=ROUND_LABELS[round]||round;
   // Model agreement — 8 models, no market data for tournament
-  const allPs=[eff,pyth,ff,tal,mc,nr,sa,la].filter(Boolean).map(m=>m.homeProb);
+  const allPs=[eff,pyth,ff,tal,mc,cs,sa,la].filter(Boolean).map(m=>m.homeProb);
   const totalModels=allPs.length;
   const favH=cH>0.5;
   const agrN=allPs.filter(p=>favH?p>0.5:p<0.5).length;

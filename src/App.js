@@ -1002,10 +1002,14 @@ const TOURNEY_ROUND_W={
   CHAMP:[0.34,0.10,0.22,0.06,0.17,0.09,0.00,0.02],
 };
 const ROUND_LABELS={R64:"Round of 64",R32:"Round of 32",S16:"Sweet 16",E8:"Elite Eight",F4:"Final Four",CHAMP:"Championship"};
-// Historical seed matchup win rates in R64 since 1985 (64-team era through 2024)
+// Historical seed matchup win rates since 1985 (64-team era through 2024)
+// R64: direct matchups seeded by committee (1v16, 2v15, ... 8v9)
+// R32: top seed survived R64, now faces the survivor of the adjacent pod (1 plays 8 or 9, etc.)
+// S16+: any combination of survivors — entries cover the most common pairings
 // Updated: 1v16 = 158/160 = 98.75% (UMBC 2018, FDU 2023 are only upsets)
 // 2v15 = ~91.7% (12 losses in ~144 games), 5v12 = ~64.4% (classic upset bracket)
 const SEED_HIST={
+  // ── R64 matchups ─────────────────────────────────────────────────────────
   "1v16":{favWin:98.7,note:"1-seeds: 98.7% — only UMBC '18 & FDU '23 upsets ever"},
   "2v15":{favWin:91.7,note:"2-seeds: 91.7% all-time (64-team era)"},
   "3v14":{favWin:85.1,note:"3-seeds: 85.1% all-time"},
@@ -1014,6 +1018,26 @@ const SEED_HIST={
   "6v11":{favWin:63.1,note:"6-seeds: 63.1% — 11s win 36.9%"},
   "7v10":{favWin:60.7,note:"7-seeds: 60.7% — 10s win 39.3%"},
   "8v9": {favWin:51.3,note:"Nearly a coin flip — 51.3% vs 48.7%"},
+  // ── R32 matchups (top seed beat 16/15/14...; now faces 8/9, 7/10, 6/11, 5/12) ──
+  "1v8": {favWin:83.3,note:"1 vs 8 in R32: 1-seeds ~83% historically"},
+  "1v9": {favWin:85.2,note:"1 vs 9 in R32: 1-seeds ~85% historically"},
+  "2v7": {favWin:68.6,note:"2 vs 7 in R32: 2-seeds ~69% historically"},
+  "2v10":{favWin:72.7,note:"2 vs 10 in R32: 2-seeds ~73% (10-upsets are Cinderella bait)"},
+  "3v6": {favWin:60.4,note:"3 vs 6 in R32: 3-seeds ~60% — competitive game"},
+  "3v11":{favWin:64.3,note:"3 vs 11 in R32: 3-seeds ~64% (11s are dangerous survivors)"},
+  "4v5": {favWin:55.6,note:"4 vs 5 in R32: nearly 50/50 — ~55.6% for the 4"},
+  "4v12":{favWin:58.8,note:"4 vs 12 in R32: 4-seeds ~59% — 12-seeds who survive are hot"},
+  // ── Sweet 16 common pairings ──────────────────────────────────────────────
+  "1v4": {favWin:66.7,note:"1 vs 4 in S16: 1-seeds ~67% — elite matchup"},
+  "1v5": {favWin:69.4,note:"1 vs 5 in S16: 1-seeds ~69%"},
+  "1v12":{favWin:78.6,note:"1 vs 12 in S16: Cinderella survivor — 1-seeds still ~79%"},
+  "2v3": {favWin:54.2,note:"2 vs 3 in S16: essentially a coin flip (~54% for 2)"},
+  "2v6": {favWin:62.5,note:"2 vs 6 in S16: 2-seeds ~63%"},
+  "2v11":{favWin:71.4,note:"2 vs 11 in S16: 2-seeds ~71%"},
+  "3v4": {favWin:52.1,note:"3 vs 4 in S16: toss-up (~52% for 3)"},
+  // ── Elite Eight / Final Four common pairings ─────────────────────────────
+  "1v2": {favWin:57.1,note:"1 vs 2 in E8/F4: slight 1-seed edge (~57%)"},
+  "1v3": {favWin:60.4,note:"1 vs 3 in E8/F4: 1-seeds ~60%"},
 };
 function getSeedHist(s1,s2){
   const lo=Math.min(s1,s2),hi=Math.max(s1,s2);

@@ -3,27 +3,32 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   const pplxKey = process.env.PERPLEXITY_API_KEY;
-  const apiKey  = process.env.ANTHROPIC_API_KEY; // fallback only
+  const apiKey  = process.env.ANTHROPIC_API_KEY;
   if (!pplxKey && !apiKey) return res.status(500).json({ error: "PERPLEXITY_API_KEY not set" });
   const { teamId, team } = req.body || {};
   if (!teamId) return res.status(400).json({ error: "teamId required" });
 
   try {
+    // ── 1. ESPN: roster + team info (concurrent) ────────────────────────────
     const rosterUrl = `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}/roster`;
-    const teamUrl = `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}`;
+    const teamUrl   = `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}`;
     const [rosterResp, teamResp] = await Promise.all([fetch(rosterUrl), fetch(teamUrl)]);
     const [rosterJson, teamJson] = await Promise.all([rosterResp.json(), teamResp.json()]);
 
     const recordSummary = teamJson?.team?.record?.items?.[0]?.summary || "0-0";
-    const parts = recordSummary.split("-");
-    const wins = parseInt(parts[0]) || 15;
+    const parts  = recordSummary.split("-");
+    const wins   = parseInt(parts[0]) || 15;
     const losses = parseInt(parts[1]) || 15;
 
-    // Fetch schedule for rest days, Elo, and H2H
     const teamNumId = String(teamJson?.team?.id || teamId || "");
-    let daysSinceLastGame = 2;
-    let teamElo = 1500;
-    let teamGames = [];
+    const rankings  = teamJson?.team?.rankings || [];
+    const espnNetRank = rankings.find(r =>
+      (r.type?.displayName||"").toLowerCase().includes("net") ||
+      (r.name||"").toLowerCase().includes("net")
+    )?.current || null;
+
+    // ── 2. ESPN: schedule → rest days + rolling Elo ─────────────────────────
+    let daysSinceLastGame = 2, teamElo = 1500, teamGames = [];
     try {
       const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}/schedule`);
       const schedJson = await schedResp.json();
@@ -34,26 +39,22 @@ export default async function handler(req, res) {
       }
       const ELO_K = 30;
       for (const ev of completed) {
-        const comp = ev.competitions?.[0];
+        const comp  = ev.competitions?.[0];
         if (!comp) continue;
-        const ours = comp.competitors?.find(c => String(c.id) === teamNumId);
+        const ours   = comp.competitors?.find(c => String(c.id) === teamNumId);
         const theirs = comp.competitors?.find(c => String(c.id) !== teamNumId);
         if (!ours || !theirs || ours.score == null || theirs.score == null) continue;
         const s = parseFloat(ours.score)||0, t = parseFloat(theirs.score)||0;
+        const win    = s > t ? 1 : 0;
         const isHome = ours.homeAway === "home";
-        const win = s > t ? 1 : 0;
         if (theirs.id) teamGames.push({ opp: String(theirs.id), win: win === 1 });
-        const effElo = teamElo + (isHome ? 50 : -50);
+        const effElo   = teamElo + (isHome ? 50 : -50);
         const expected = 1 / (1 + Math.pow(10, (1500 - effElo) / 400));
-        const margin = Math.abs(s - t);
-        teamElo += ELO_K * Math.max(0.5, Math.log(margin + 1) / Math.log(15)) * (win - expected);
+        teamElo += ELO_K * Math.max(0.5, Math.log(Math.abs(s-t)+1)/Math.log(15)) * (win - expected);
       }
     } catch(_) {}
 
-    // Try ESPN NET ranking
-    const rankings = teamJson?.team?.rankings || [];
-    const espnNetRank = rankings.find(r => (r.type?.displayName||"").toLowerCase().includes("net") || (r.name||"").toLowerCase().includes("net"))?.current || null;
-
+    // ── 3. Extract player IDs + names from roster ────────────────────────────
     const athletes = rosterJson?.athletes || [];
     let allPlayers = [];
     if (Array.isArray(athletes) && athletes.length > 0) {
@@ -63,26 +64,107 @@ export default async function handler(req, res) {
         allPlayers = athletes;
       }
     }
-    const playerNames = allPlayers.map(p => p.fullName || p.displayName || "").filter(Boolean).slice(0, 18);
+    const playerEntries = allPlayers
+      .filter(p => p.fullName || p.displayName)
+      .slice(0, 15)
+      .map(p => ({ id: String(p.id || p.athlete?.id || ""), name: p.fullName || p.displayName || "" }))
+      .filter(p => p.name);
 
-    if (playerNames.length === 0) {
+    if (playerEntries.length === 0) {
       return res.status(500).json({ error: "ESPN roster empty for " + team, rosterUrl });
     }
 
-    const schema = '{"wins":0,"losses":0,"ppg":75.0,"opp":70.0,"tempo":68.0,"efg_pct":0.52,"tov_rate":16.0,"oreb_pct":0.30,"ft_rate":0.35,"opp_efg_pct":0.50,"opp_tov_rate":16.0,"opp_oreb_pct":0.28,"conference":"Big Ten","ranking":0,"kenpom_rank":100,"roster":[{"name":"Player Name","ppg":15.0,"rpg":5.0,"apg":3.0,"mpg":30.0,"per":18.0,"role":"STAR","status":"PLAYING"}]}';
+    // ── 4. ESPN: per-game stats for every player (concurrent) ────────────────
+    // ESPN athlete stats endpoint — returns season splits with per-game averages.
+    // Field names tried in priority order to handle ESPN's inconsistent naming.
+    const fetchPlayerStats = async ({ id, name }) => {
+      if (!id) return { name, espn: false };
+      try {
+        const r = await fetch(
+          `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/athletes/${id}/statistics/0`
+        );
+        if (!r.ok) return { name, espn: false };
+        const d = await r.json();
+
+        // Flatten all stats from all categories
+        const cats     = d?.statistics?.splits?.categories || d?.statistics?.categories || [];
+        const allStats = cats.flatMap(c => c.stats || []);
+
+        const getStat = (...keys) => {
+          for (const k of keys) {
+            const s = allStats.find(s =>
+              s.name === k || s.abbreviation === k ||
+              s.shortDisplayName === k || s.displayName === k
+            );
+            if (s?.value != null && !isNaN(s.value)) return Math.round(parseFloat(s.value) * 10) / 10;
+          }
+          return null;
+        };
+
+        // Try both "avg" prefixed names and short abbreviations
+        const ppg = getStat("avgPoints",    "PPG", "PTS",  "points",    "pointsPerGame");
+        const rpg = getStat("avgRebounds",  "RPG", "REB",  "rebounds",  "reboundsPerGame",  "avgTotalRebounds", "totalReboundsPerGame");
+        const apg = getStat("avgAssists",   "APG", "AST",  "assists",   "assistsPerGame");
+        const mpg = getStat("avgMinutes",   "MPG", "MIN",  "minutes",   "minutesPerGame");
+
+        // If ESPN returned nothing useful, fall back to AI
+        if (ppg === null && rpg === null) return { name, espn: false };
+        return { name, ppg, rpg, apg, mpg, espn: true };
+      } catch { return { name, espn: false }; }
+    };
+
+    const statsResults = await Promise.allSettled(playerEntries.map(fetchPlayerStats));
+    const playerStats  = statsResults.map(r => r.status === "fulfilled" ? r.value : { espn: false });
+
+    // Names of players whose ESPN fetch failed (need AI to fill in stats)
+    const needsAI   = playerStats.filter(p => !p.espn).map(p => p.name);
+    const playerNames = playerEntries.map(p => p.name);
+
+    // ── 5. Perplexity: team stats + injury status + stats for ESPN-failed players
+    const teamStatsSchema = JSON.stringify({
+      wins:0, losses:0, ppg:75.0, opp:70.0, tempo:68.0,
+      efg_pct:0.52, tov_rate:16.0, oreb_pct:0.30, ft_rate:0.35,
+      opp_efg_pct:0.50, opp_tov_rate:16.0, opp_oreb_pct:0.28,
+      conference:"Big Ten", ranking:0, kenpom_rank:100
+    });
+
+    // Roster block: if ESPN succeeded for a player, only ask for status.
+    // If ESPN failed, ask for full stats + status.
+    const rosterSchemaBlock = playerNames.map(name => {
+      const s = playerStats.find(p => p.name === name);
+      if (s?.espn) return `{"name":"${name}","status":"PLAYING"}`;
+      return `{"name":"${name}","ppg":0,"rpg":0,"apg":0,"mpg":0,"status":"PLAYING"}`;
+    }).join(",");
+
+    const promptRules = [
+      "wins/losses: current season record",
+      "ppg/opp: team season scoring averages",
+      "tempo: possessions per 40 min (KenPom or Barttorvik)",
+      "efg_pct as decimal (0.52 = 52%)",
+      "ranking: AP poll rank, 0 if unranked",
+      "kenpom_rank: KenPom or NET rank (1-364)",
+      "roster.status: search injury report — OUT=out/injured/suspended, DOUBTFUL=doubtful, QUESTIONABLE=day-to-day, PLAYING=healthy",
+      needsAI.length ? `roster ppg/rpg/apg/mpg: season per-game averages (ONLY needed for: ${needsAI.join(", ")})` : null,
+    ].filter(Boolean).join("\n- ");
+
+    const userPrompt = `Search for current 2025-26 NCAA basketball stats and injury report for ${team}.
+
+Return ONLY this JSON (fill in all values):
+{"wins":0,"losses":0,"ppg":0,"opp":0,"tempo":0,"efg_pct":0,"tov_rate":0,"oreb_pct":0,"ft_rate":0,"opp_efg_pct":0,"opp_tov_rate":0,"opp_oreb_pct":0,"conference":"","ranking":0,"kenpom_rank":0,"roster":[${rosterSchemaBlock}]}
+
+Rules:
+- ${promptRules}`;
 
     let raw = "";
-
     if (pplxKey) {
-      // Single Perplexity Sonar call: search + format in one shot (faster, cheaper, more current)
       const r = await fetch("https://api.perplexity.ai/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${pplxKey}` },
         body: JSON.stringify({
           model: "sonar-pro",
           messages: [
-            { role: "system", content: "You are a sports data API. Search the web for current stats and return ONLY a raw JSON object. No markdown, no code fences, no explanation, no text before or after the JSON." },
-            { role: "user", content: `Search for current 2025-26 NCAA basketball season stats for ${team}. Also search for their current injury report. Return this exact JSON schema filled with real data:\n${schema}\n\nRoster - include ALL players below using their EXACT names:\n${playerNames.join(", ")}\n\nRules:\n- wins/losses: current season record\n- ppg/opp: season scoring averages\n- tempo: possessions per 40 min (KenPom or Barttorvik)\n- efg_pct as decimal (e.g. 0.52 = 52%)\n- ranking: AP poll rank, 0 if unranked\n- kenpom_rank: KenPom or NET rank (1-364)\n- For each player:\n  - ppg/rpg/apg/mpg: season per-game averages\n  - role: STAR if ppg>15, KEY if ppg>8, else ROLE\n  - per: do NOT use a formula — use the player's actual efficiency rating if available; otherwise estimate as (ppg*1.0 + rpg*0.6 + apg*0.5) * sqrt(mpg/30)\n  - status: search injury reports — use OUT if player is out/injured/suspended, DOUBTFUL if doubtful, QUESTIONABLE if questionable/day-to-day, PLAYING if healthy/no injury listed` }
+            { role: "system", content: "You are a sports data API. Return ONLY a raw JSON object. No markdown, no code fences, no explanation." },
+            { role: "user", content: userPrompt }
           ],
           temperature: 0.1
         })
@@ -90,72 +172,83 @@ export default async function handler(req, res) {
       const d = await r.json();
       raw = d.choices?.[0]?.message?.content || "";
     } else {
-      // Fallback: Anthropic (two-call search + format)
       const search = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 800, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: team + " 2025-26 NCAA basketball stats wins losses ppg opponent-ppg efg% turnover rate offensive rebound rate free throw rate tempo kenpom rank player scoring averages minutes per game injury report status" }] })
+        body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 800, tools: [{ type: "web_search_20250305", name: "web_search" }], messages: [{ role: "user", content: `${team} 2025-26 NCAA basketball: ppg opp tempo efg% tov% oreb% kenpom rank injury report ${playerNames.join(" ")}` }] })
       });
       const sd = await search.json();
-      const searchText = (sd.content || []).filter(b => b.type === "text").map(b => b.text).join("").slice(0, 2000);
+      const searchText = (sd.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").slice(0,2000);
       const fmt = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 2500, system: "Output only a single raw JSON object. No markdown, no explanation, no code fences.", messages: [{ role: "user", content: "Build JSON for " + team + " college basketball 2025-26 season.\n\nRoster (use EXACT names, include ALL):\n" + playerNames.join(", ") + "\n\nStats data:\n" + searchText + "\n\nSchema:\n" + schema + "\n\nRules: Include EVERY player in roster array. role=STAR if ppg>15, KEY if ppg>8, else ROLE. per=actual efficiency rating if available, else (ppg*1.0+rpg*0.6+apg*0.5)*sqrt(mpg/30). status=OUT if injured/out/suspended, DOUBTFUL if doubtful, QUESTIONABLE if questionable/day-to-day, PLAYING if healthy. ranking=AP poll rank 0 if unranked. kenpom_rank=estimated 1-364." }] })
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 2000, system: "Output only a single raw JSON object. No markdown, no code fences.", messages: [{ role: "user", content: `${team} 2025-26 NCAA basketball. Stats: ${searchText}\n\nReturn: ${JSON.stringify({...JSON.parse(teamStatsSchema), roster: playerNames.map(n=>({name:n,ppg:0,rpg:0,apg:0,mpg:0,status:"PLAYING"}))})}\n\nRules: team stats from search data. status: OUT/DOUBTFUL/QUESTIONABLE/PLAYING per injury report. ppg/rpg/apg/mpg: per-game averages.` }] })
       });
       const fd = await fmt.json();
-      raw = (fd.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+      raw = (fd.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").trim();
     }
 
+    // ── 6. Parse Perplexity response ─────────────────────────────────────────
     let parsed = null;
-    // 1. Direct parse
     try { parsed = JSON.parse(raw); } catch(_) {}
-    // 2. Strip markdown code fences
     if (!parsed) { try { parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i,"").replace(/\s*```\s*$/,"")); } catch(_) {} }
-    // 3. Extract first { ... } block
     if (!parsed) { try { const i=raw.indexOf("{"),j=raw.lastIndexOf("}"); if(i>=0&&j>i) parsed=JSON.parse(raw.slice(i,j+1)); } catch(_) {} }
-    if (!parsed) return res.status(500).json({ error: "Parse failed — Perplexity returned unexpected format", raw: raw.slice(0,300) });
+    if (!parsed) return res.status(500).json({ error: "Parse failed", raw: raw.slice(0,300) });
 
-    parsed.wins = parsed.wins || wins;
-    parsed.losses = parsed.losses || losses;
-    parsed.ppg = parsed.ppg || 75;
-    parsed.opp = parsed.opp || 70;
-    parsed.tempo = parsed.tempo || 68;
-    parsed.efg_pct = parsed.efg_pct || 0.52;
-    parsed.tov_rate = parsed.tov_rate || 16;
-    parsed.oreb_pct = parsed.oreb_pct || 0.30;
-    parsed.ft_rate = parsed.ft_rate || 0.35;
-    parsed.opp_efg_pct = parsed.opp_efg_pct || 0.50;
-    parsed.opp_tov_rate = parsed.opp_tov_rate || 16;
-    parsed.opp_oreb_pct = parsed.opp_oreb_pct || 0.28;
-    parsed.conference = parsed.conference || "Unknown";
-    parsed.ranking = parsed.ranking || 0;
-    parsed.kenpom_rank = parsed.kenpom_rank || 150;
-    parsed.rest = daysSinceLastGame;
-    parsed.elo = Math.round(teamElo);
-    parsed.espn_id = teamNumId;
-    parsed.games = teamGames;
+    // ── 7. Apply team stat defaults ──────────────────────────────────────────
+    parsed.wins          = parsed.wins          || wins;
+    parsed.losses        = parsed.losses        || losses;
+    parsed.ppg           = parsed.ppg           || 75;
+    parsed.opp           = parsed.opp           || 70;
+    parsed.tempo         = parsed.tempo         || 68;
+    parsed.efg_pct       = parsed.efg_pct       || 0.52;
+    parsed.tov_rate      = parsed.tov_rate      || 16;
+    parsed.oreb_pct      = parsed.oreb_pct      || 0.30;
+    parsed.ft_rate       = parsed.ft_rate       || 0.35;
+    parsed.opp_efg_pct   = parsed.opp_efg_pct   || 0.50;
+    parsed.opp_tov_rate  = parsed.opp_tov_rate  || 16;
+    parsed.opp_oreb_pct  = parsed.opp_oreb_pct  || 0.28;
+    parsed.conference    = parsed.conference    || "Unknown";
+    parsed.ranking       = parsed.ranking       || 0;
+    parsed.kenpom_rank   = parsed.kenpom_rank   || 150;
+    parsed.rest          = daysSinceLastGame;
+    parsed.elo           = Math.round(teamElo);
+    parsed.espn_id       = teamNumId;
+    parsed.games         = teamGames;
     if (espnNetRank) parsed.kenpom_rank = espnNetRank;
+
+    // ── 8. Build final roster: ESPN stats (authoritative) + AI injury status ──
     const VALID_STATUS = new Set(["PLAYING","OUT","DOUBTFUL","QUESTIONABLE"]);
-    parsed.roster = (parsed.roster || []).map(p => {
-      const ppg = p.ppg || 5;
-      const rpg = p.rpg || 3;
-      const apg = p.apg || 1;
-      const mpg = p.mpg || 25;
-      // PER: use reported value if realistic, else compute from box stats
-      // Formula: (ppg*1.0 + rpg*0.6 + apg*0.5) * sqrt(mpg/30)
-      // Produces ~17 for a 15/5/3 starter at 30 min, ~27 for a 22/8/4 star at 35 min
-      const computedPer = (ppg * 1.0 + rpg * 0.6 + apg * 0.5) * Math.sqrt(Math.max(mpg, 10) / 30);
-      const per = (p.per && p.per > 1 && p.per < 50) ? p.per : computedPer;
-      const status = VALID_STATUS.has(p.status) ? p.status : "PLAYING";
-      return {
-        name: p.name || "Unknown",
-        ppg, rpg, apg, mpg,
-        per: Math.round(per * 10) / 10,
-        role: p.role || "ROLE",
-        status
-      };
+
+    // Map from player name → injury status from Perplexity
+    const injuryMap = {};
+    for (const p of (parsed.roster || [])) {
+      if (p.name) injuryMap[p.name] = VALID_STATUS.has(p.status) ? p.status : "PLAYING";
+    }
+
+    // Map from player name → AI stats (for ESPN-failed players only)
+    const aiStatsMap = {};
+    for (const p of (parsed.roster || [])) {
+      if (p.name && !playerStats.find(s => s.name === p.name && s.espn)) {
+        aiStatsMap[p.name] = p;
+      }
+    }
+
+    parsed.roster = playerStats.map(espnP => {
+      const ai  = aiStatsMap[espnP.name] || {};
+      const ppg = espnP.espn ? (espnP.ppg ?? 5)  : (ai.ppg || 5);
+      const rpg = espnP.espn ? (espnP.rpg ?? 3)  : (ai.rpg || 3);
+      const apg = espnP.espn ? (espnP.apg ?? 1)  : (ai.apg || 1);
+      const mpg = espnP.espn ? (espnP.mpg ?? 25) : (ai.mpg || 25);
+
+      // PER: (ppg + weighted reb + weighted ast) normalised by √(mpg/30)
+      const per = Math.round(((ppg * 1.0 + rpg * 0.6 + apg * 0.5) * Math.sqrt(Math.max(mpg, 10) / 30)) * 10) / 10;
+      const role   = ppg > 15 ? "STAR" : ppg > 8 ? "KEY" : "ROLE";
+      const status = injuryMap[espnP.name] || "PLAYING";
+
+      return { name: espnP.name, ppg, rpg, apg, mpg, per, role, status };
     });
+
     return res.status(200).json(parsed);
   } catch (err) {
     return res.status(500).json({ error: err.message });

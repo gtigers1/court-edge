@@ -75,39 +75,63 @@ export default async function handler(req, res) {
     }
 
     // ── 4. ESPN: per-game stats for every player (concurrent) ────────────────
-    // ESPN athlete stats endpoint — returns season splits with per-game averages.
-    // Field names tried in priority order to handle ESPN's inconsistent naming.
+    // Correct endpoint: /common/v3/ path (the /site/v2/ statistics endpoint 404s for NCAAM).
+    // ESPN returns POSITIONAL string arrays — stats[] values map 1:1 to labels[].
+    // Verified structure from live API:
+    //   categories[0] = "averages", labels = ["GP","GS","MIN","FG","FG%","3PT","3P%",
+    //     "FT","FT%","OR","DR","REB","AST","BLK","STL","PF","TO","PTS"]
+    //   stats = positional strings e.g. ["33","33","25.2",...,"3.0","4.7",...,"7.7"]
+    //   PTS=index 17, REB=index 11, AST=index 12, MIN=index 2
     const fetchPlayerStats = async ({ id, name }) => {
       if (!id) return { name, espn: false };
       try {
         const r = await fetch(
-          `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/athletes/${id}/statistics/0`
+          `https://site.api.espn.com/apis/common/v3/sports/basketball/mens-college-basketball/athletes/${id}/stats`
         );
         if (!r.ok) return { name, espn: false };
         const d = await r.json();
 
-        // Flatten all stats from all categories
-        const cats     = d?.statistics?.splits?.categories || d?.statistics?.categories || [];
-        const allStats = cats.flatMap(c => c.stats || []);
+        // Find the "averages" category (per-game stats)
+        const cats   = d?.categories || [];
+        const avgCat = cats.find(c => c.name === "averages") || cats[0];
+        if (!avgCat) return { name, espn: false };
 
-        const getStat = (...keys) => {
+        const labels   = avgCat.labels || [];   // ["GP","GS","MIN",...,"REB","AST",...,"PTS"]
+        const nameList = avgCat.names  || [];   // ["gamesPlayed","gamesStarted","avgMinutes",...,"avgPoints"]
+
+        // Pick the current season row — highest year, most games played if tie
+        const rows = avgCat.statistics || [];
+        const currentRow = rows.reduce((best, row) => {
+          if (!best) return row;
+          const bYear = best.season?.year || 0, rYear = row.season?.year || 0;
+          if (rYear !== bYear) return rYear > bYear ? row : best;
+          // Same year: prefer more games played
+          const bGP = parseFloat((best.stats||[])[0]) || 0;
+          const rGP = parseFloat((row.stats ||[])[0]) || 0;
+          return rGP > bGP ? row : best;
+        }, null);
+
+        if (!currentRow?.stats) return { name, espn: false };
+        const statsArr = currentRow.stats; // positional string array
+
+        // Look up a stat by its label ("PTS") or names-array entry ("avgPoints")
+        const getByLabel = (...keys) => {
           for (const k of keys) {
-            const s = allStats.find(s =>
-              s.name === k || s.abbreviation === k ||
-              s.shortDisplayName === k || s.displayName === k
-            );
-            if (s?.value != null && !isNaN(s.value)) return Math.round(parseFloat(s.value) * 10) / 10;
+            let idx = labels.indexOf(k);
+            if (idx < 0) idx = nameList.indexOf(k);
+            if (idx >= 0 && idx < statsArr.length) {
+              const val = parseFloat(statsArr[idx]);
+              if (!isNaN(val)) return Math.round(val * 10) / 10;
+            }
           }
           return null;
         };
 
-        // Try both "avg" prefixed names and short abbreviations
-        const ppg = getStat("avgPoints",    "PPG", "PTS",  "points",    "pointsPerGame");
-        const rpg = getStat("avgRebounds",  "RPG", "REB",  "rebounds",  "reboundsPerGame",  "avgTotalRebounds", "totalReboundsPerGame");
-        const apg = getStat("avgAssists",   "APG", "AST",  "assists",   "assistsPerGame");
-        const mpg = getStat("avgMinutes",   "MPG", "MIN",  "minutes",   "minutesPerGame");
+        const ppg = getByLabel("PTS", "avgPoints");
+        const rpg = getByLabel("REB", "avgRebounds");
+        const apg = getByLabel("AST", "avgAssists");
+        const mpg = getByLabel("MIN", "avgMinutes");
 
-        // If ESPN returned nothing useful, fall back to AI
         if (ppg === null && rpg === null) return { name, espn: false };
         return { name, ppg, rpg, apg, mpg, espn: true };
       } catch { return { name, espn: false }; }

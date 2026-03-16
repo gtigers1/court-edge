@@ -1081,16 +1081,31 @@ function NCAAMPage(){
     if(!homeData||!awayData)return;
     setAnalyzing(true);
     setTimeout(()=>{
-      // All tournament games are at neutral sites — no home court advantage
-      const eff=ncaamMdlEfficiency(homeData,awayData,true);
-      const pyth=ncaamMdlPythagorean(homeData,awayData,true);
+      // Schedule-strength normalization: removes raw PPG/OPP inflation from weak conferences.
+      // A Summit League team scoring 80 PPG against weak defenses ≠ 80 PPG in the Big Ten.
+      // Formula: each tier point above/below the 6.5 "average conference" = ±4 pts to net rating,
+      // split 60% into PPG adjustment and 40% into OPP adjustment.
+      // Applied to PPG/OPP-based models (Efficiency, Pythagorean, Monte Carlo, LuckAdj).
+      // Factor/talent/seed models use original data since those signals are not PPG-based.
+      const confNorm=(d,conf)=>{
+        const tier=CONF_STRENGTH[conf]||6.0;
+        const delta=(tier-6.5)*4.0;
+        return{...d,ppg:Math.max(55,d.ppg+delta*0.60),opp:Math.max(45,d.opp-delta*0.40)};
+      };
+      const hNorm=confNorm({...homeData,conf:homeTeam?.conf},homeTeam?.conf);
+      const aNorm=confNorm({...awayData,conf:awayTeam?.conf},awayTeam?.conf);
+      // Models using schedule-strength-normalized PPG/OPP
+      const eff=ncaamMdlEfficiency(hNorm,aNorm,true);
+      const pyth=ncaamMdlPythagorean(hNorm,aNorm,true);
+      // Four Factors and Talent use original stats (eFG%/PER are not easily SOS-normalized)
       const ff=ncaamMdlFourFactors(homeData,awayData,true);
       const tal=ncaamMdlTalent(homeData,awayData,true);
-      const mc=ncaamMdlMonteCarlo(homeData,awayData,10000,true);
-      // Pass conference from team selector — API response doesn't include conf
+      const mc=ncaamMdlMonteCarlo(hNorm,aNorm,10000,true);
+      // Conference Strength uses its own conference-bonus formula on original data
       const cs=ncaamMdlConferenceStrength({...homeData,conf:homeTeam?.conf},{...awayData,conf:awayTeam?.conf});
       const sa=ncaamMdlSeedAnchor(homeData,awayData,awaySeed,homeSeed);
-      const la=ncaamMdlLuckAdjusted(homeData,awayData);
+      // Luck Adjusted uses normalized stats so Pythagorean regression is on schedule-corrected data
+      const la=ncaamMdlLuckAdjusted(hNorm,aNorm);
       const hExpN=parseFloat(mc.hExp),aExpN=parseFloat(mc.aExp);
       const modelSpread=(hExpN-aExpN).toFixed(1);const modelTotal=(hExpN+aExpN).toFixed(1);
       // Cinderella detection: underdog (higher seed) with small KenPom gap vs their seed implies

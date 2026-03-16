@@ -1140,7 +1140,7 @@ function NCAAMPage(){
 
 function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,tab,setTab,onRecalc}){
   const [copied,setCopied]=useState(false);
-  const {eff,pyth,ff,tal,mc,nr,sa,la,cons,modelSpread,modelTotal,round,awaySeed,homeSeed,cinderella}=results;const cH=cons,aw=1-cH;
+  const {eff,pyth,ff,tal,mc,nr,sa,la,cons,round,awaySeed,homeSeed,cinderella}=results;const cH=cons,aw=1-cH;
   // Tournament context — no betting data needed
   const aSeedN=parseInt(awaySeed)||0,hSeedN=parseInt(homeSeed)||0;
   const seedMatchup=aSeedN&&hSeedN?getSeedHist(aSeedN,hSeedN):null;
@@ -1163,7 +1163,6 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,tab,setTab,on
       `Prediction: ${winner} advances (${winnerPct}%)`,
       `${awayAbbr} ${(aw*100).toFixed(1)}% | ${homeAbbr} ${(cH*100).toFixed(1)}%`,
       `Model agreement: ${agrN}/${totalModels} — ${advSignal}`,
-      modelTotal?`Projected score: ${modelTotal} pts total`:null,
       cinderella?`⚠ Cinderella Alert: ${cinderella.team} (KenPom #${cinderella.kpRank})`:null,
     ].filter(Boolean).join("\n");
     navigator.clipboard.writeText(lines);setCopied(true);setTimeout(()=>setCopied(false),2000);
@@ -1237,14 +1236,6 @@ function NCAAMResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,tab,setTab,on
           return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(62px,1fr))",gap:8}}>{items.map(m=>{const af=m.p>.5;const dp=af?m.p:1-m.p;const da=af?awayAbbr:homeAbbr;return <div key={m.l} style={{textAlign:"center",background:C.black,borderRadius:8,padding:"10px 6px",border:"1px solid "+C.amber+"44"}}><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:C.amber}}>{(dp*100).toFixed(0)}%</div><div style={{fontSize:10,color:C.amber,fontWeight:700,marginBottom:2}}>{da}</div><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:.5}}>{m.l}</div></div>;})}</div>;
         })()}
       </div>
-      {modelSpread!=null&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:14,marginTop:10}}>
-        <div style={{fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:C.amber,textTransform:"uppercase",marginBottom:10}}>Model Lines</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
-          <div style={{background:C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+C.border}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Model Spread</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:C.amber}}>{parseFloat(modelSpread)>=0?homeAbbr+" -"+modelSpread:awayAbbr+" -"+Math.abs(parseFloat(modelSpread)).toFixed(1)}</div><div style={{fontSize:10,color:C.muted,marginTop:4}}>Model projected margin</div></div>
-          <div style={{background:C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+C.border}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Model Total</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:C.amber}}>{modelTotal} pts</div><div style={{fontSize:10,color:C.muted,marginTop:4}}>Projected combined score</div></div>
-          <div style={{background:C.black,borderRadius:8,padding:"10px 12px",border:"1px solid "+C.border}}><div style={{fontSize:9,color:C.dim,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Projected Score</div><div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:16,color:C.amber,lineHeight:1.4}}>{awayAbbr} {mc.aExp}<br/>{homeAbbr} {mc.hExp}</div></div>
-        </div>
-      </div>}
     </>}
     {tab==="method"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[
       ["AEM","Adj. Efficiency (22%)","Self-contained net rating per 100 possessions, adjusted by KenPom rank SOS. Neutral site — no HCA. #1 long-run predictor per research."],

@@ -100,30 +100,31 @@ function ncaamMdlEfficiency(h, a) {
 }
 
 function ncaamMdlPythagorean(h, a) {
-  const hP = pythagorean(h.ppg, h.opp, 13.0);
-  const aP = pythagorean(a.ppg, a.opp, 13.0);
+  const hP = pythagorean(h.ppg, h.opp, 12.0);
+  const aP = pythagorean(a.ppg, a.opp, 12.0);
   const hSOS = Math.max(0.90, Math.min(1.10, 1 + (175 - Math.min(h.kenpom_rank || 150, 350)) * 0.0015));
   const aSOS = Math.max(0.90, Math.min(1.10, 1 + (175 - Math.min(a.kenpom_rank || 150, 350)) * 0.0015));
   const hQ = Math.min(0.97, hP * hSOS);
   const aQ = Math.min(0.97, aP * aSOS);
-  // No HCA on neutral site (remove hHCA boost)
-  const p = log5(Math.max(0.03, hQ), Math.max(0.03, aQ));
+  // No HCA on neutral site; use logistic for single-game prediction (not Log5 designed for series)
+  const diff = hQ - aQ;
+  const p = logistic(diff * 5.5);
   return { homeProb: Math.min(0.97, Math.max(0.03, p)) };
 }
 
 function ncaamMdlFourFactors(h, a) {
   const offFF = d => {
-    const efg = (d.efg_pct || 0.50) * 0.40;
-    const tov = (1 - Math.min(d.tov_rate || 18, 35) / 35) * 0.25;
+    const efg = (d.efg_pct || 0.50) * 0.36;
+    const tov = (1 - Math.min(d.tov_rate || 18, 35) / 35) * 0.28;
     const oreb = (d.oreb_pct || 0.30) * 0.20;
-    const ftr = Math.min(d.ft_rate || 0.35, 0.60) * 0.15;
+    const ftr = Math.min(d.ft_rate || 0.35, 0.60) * 0.16;
     return efg + tov + oreb + ftr;
   };
   const defFF = d => {
-    const efg  = Math.max(0, (0.56 - (d.opp_efg_pct || d.efg_pct || 0.50))) * 0.33;
+    const efg  = Math.max(0, (0.56 - (d.opp_efg_pct || d.efg_pct || 0.50))) * 0.28;
     const tov  = Math.min((d.opp_tov_rate || d.tov_rate || 18) / 35, 1) * 0.22;
     const oreb = Math.max(0, 0.32 - (d.opp_oreb_pct || d.oreb_pct || 0.28)) * 0.17;
-    const p3d  = Math.max(0, (0.345 - (d.opp_3p_pct || 0.335))) * 0.18;
+    const p3d  = Math.max(0, (0.345 - (d.opp_3p_pct || 0.335))) * 0.23;
     const ftd  = Math.max(0, 0.35 - (d.opp_ftr || 0.30)) * 0.10;
     return efg + tov + oreb + p3d + ftd;
   };
@@ -168,13 +169,15 @@ function ncaamMdlMonteCarlo(h, a, N = 8000) {
 }
 
 // Data-driven rebalance: MC was most accurate (75.1%), Pyth weakest (71.9%)
+// Talent increases in late rounds (elite scorers take over in championship games)
+// [AdjEff, Pythagorean, FourFactors, Talent, MonteCarlo]
 const TOURNEY_ROUND_W = {
-  R64:  [0.28, 0.18, 0.20, 0.13, 0.21],
-  R32:  [0.30, 0.16, 0.22, 0.12, 0.20],
-  S16:  [0.33, 0.13, 0.23, 0.11, 0.20],
-  E8:   [0.35, 0.11, 0.24, 0.10, 0.20],
-  F4:   [0.38, 0.09, 0.25, 0.09, 0.19],
-  CHAMP:[0.40, 0.08, 0.25, 0.08, 0.19],
+  R64:  [0.28, 0.14, 0.21, 0.16, 0.21],
+  R32:  [0.29, 0.13, 0.22, 0.17, 0.19],
+  S16:  [0.30, 0.11, 0.22, 0.18, 0.19],
+  E8:   [0.31, 0.10, 0.23, 0.19, 0.17],
+  F4:   [0.31, 0.09, 0.23, 0.21, 0.16],
+  CHAMP:[0.30, 0.08, 0.24, 0.23, 0.15],
 };
 
 function ncaamConsensus(ps, round = 'R64') {

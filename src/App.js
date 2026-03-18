@@ -1910,7 +1910,8 @@ function NCAATreePage(){
       const g=runGame(s16[0].w,s16[1].w,"E8");return g.p>=0.5?adv(s16[0].w,g):adv(s16[1].w,g);
     };
     const champs=REGIONS.map(r=>getChamp(r));
-    const f4=[[0,1],[2,3]].map(([i,j])=>{const t1=champs[i],t2=champs[j];const g=runGame(t1,t2,"F4");return{t1,t2,p:g.p,w:g.p>=0.5?t1:t2,dataMode:g.dataMode};});
+    // NCAA bracket: East (0) vs South (2), West (1) vs Midwest (3)
+    const f4=[[0,2],[1,3]].map(([i,j])=>{const t1=champs[i],t2=champs[j];const g=runGame(t1,t2,"F4");return{t1,t2,p:g.p,w:g.p>=0.5?t1:t2,dataMode:g.dataMode};});
     const gC=runGame(f4[0].w,f4[1].w,"CHAMP");
     return{f4,champ:{t1:f4[0].w,t2:f4[1].w,p:gC.p,w:gC.p>=0.5?f4[0].w:f4[1].w,dataMode:gC.dataMode}};
   };
@@ -2089,8 +2090,8 @@ function NCAAOraclePage(){
           // Elite 8 → region champ
           const c=wg(e[0],e[1]);sv[c.id][3]++;rc.push(c);
         }
-        // Final Four: East vs West, South vs Midwest
-        const fw=[wg(rc[0],rc[1]),wg(rc[2],rc[3])];fw.forEach(t=>sv[t.id][4]++);
+        // Final Four: East (0) vs South (2), West (1) vs Midwest (3)
+        const fw=[wg(rc[0],rc[2]),wg(rc[1],rc[3])];fw.forEach(t=>sv[t.id][4]++);
         // Championship
         sv[wg(fw[0],fw[1]).id][5]++;
       }

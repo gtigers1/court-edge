@@ -1010,17 +1010,21 @@ const CONF_STRENGTH={
 function ncaamMdlConferenceStrength(h,a){
   const hCS=CONF_STRENGTH[h.conf]||5.5;
   const aCS=CONF_STRENGTH[a.conf]||5.5;
-  // Small bonus on top of normalization: captures coaching/depth/pressure-game experience
+  // Conference tier bonus: coaching depth, tournament experience, pressure-game quality
   const confBonus=(hCS-aCS)*0.55;
-  // Note: KenPom rank SOS intentionally excluded here — Efficiency model already uses rank.
-  // Conference Strength should be purely tier-based to stay orthogonal to Model 1.
+  // Direct SOS comparison from TeamRankings data — primary anchor against raw stat inflation.
+  // Mid-majors (e.g. Kennesaw SOS=-1.8) can show inflated raw PPG from weak opponents;
+  // this signal correctly weights schedule quality vs. power conference teams (Gonzaga SOS=9.8).
+  const hSOS=h.sos_rating??null;
+  const aSOS=a.sos_rating??null;
+  const sosBonus=(hSOS!=null&&aSOS!=null)?(hSOS-aSOS)*0.50:0;
   // Conference tournament winner: +0.8pt momentum boost (team is hot, peaked at right time)
   const hCTW=h.conf_tourney_winner?0.8:0;
   const aCTW=a.conf_tourney_winner?0.8:0;
-  const hAdj=(h.ppg-h.opp)+confBonus+hCTW;
+  const hAdj=(h.ppg-h.opp)+confBonus+sosBonus+hCTW;
   const aAdj=(a.ppg-a.opp)+aCTW;
   const p=logistic((hAdj-aAdj)*0.10);
-  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hAdj:hAdj.toFixed(1),aAdj:aAdj.toFixed(1),hCS:hCS.toFixed(1),aCS:aCS.toFixed(1),detail:`H conf+SOS: ${hAdj.toFixed(1)}  A conf+SOS: ${aAdj.toFixed(1)}  (tiers ${hCS}/${aCS})`};}
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hAdj:hAdj.toFixed(1),aAdj:aAdj.toFixed(1),hCS:hCS.toFixed(1),aCS:aCS.toFixed(1),detail:`H conf+SOS: ${hAdj.toFixed(1)}  A conf+SOS: ${aAdj.toFixed(1)}  (tiers ${hCS}/${aCS}, SOS ${hSOS?.toFixed(1)??'?'}/${aSOS?.toFixed(1)??'?'})`};}
 
 // Model 7: Historical Seed Anchor (Bayesian prior from 40 years of tournament data)
 // R64 seed matchup historical rates are strong priors; shift toward KenPom when ranks disagree.
@@ -1190,7 +1194,7 @@ function NCAAMPage(){
       const confNorm=(d,conf,teamName)=>{
         const sos=SOS_RATINGS[teamName]??null;
         const delta=sos!=null?(sos-3)*0.7:((CONF_STRENGTH[conf]||6.0)-6.5)*4.0;
-        return{...d,ppg:Math.max(55,d.ppg+delta*0.60),opp:Math.max(45,d.opp-delta*0.40)};
+        return{...d,ppg:Math.max(55,d.ppg+delta*0.60),opp:Math.max(45,d.opp-delta*0.40),sos_rating:sos};
       };
       const hNorm=confNorm({...homeData,conf:homeTeam?.conf},homeTeam?.conf,homeTeam?.name);
       const aNorm=confNorm({...awayData,conf:awayTeam?.conf},awayTeam?.conf,awayTeam?.name);
@@ -1818,7 +1822,7 @@ function NCAATreePage(){
   const [errors,setErrors]=useState({});
   const setSel=(region,seed,team)=>{setSels(prev=>({...prev,[region]:{...prev[region],[seed]:team}}));setBrackets(prev=>{const n={...prev};delete n[region];return n;});};
   const R64_PAIRS=[[1,16],[8,9],[5,12],[4,13],[6,11],[3,14],[7,10],[2,15]];
-  const confNormFn=(d,conf,teamName)=>{const sos=SOS_RATINGS[teamName]??null;const delta=sos!=null?(sos-3)*0.7:((CONF_STRENGTH[conf]||6.0)-6.5)*4.0;const ppg=d.ppg||70;const opp=d.opp||68;return{...d,ppg:Math.max(55,ppg+delta*0.60),opp:Math.max(45,opp-delta*0.40),tempo:d.tempo||68};};
+  const confNormFn=(d,conf,teamName)=>{const sos=SOS_RATINGS[teamName]??null;const delta=sos!=null?(sos-3)*0.7:((CONF_STRENGTH[conf]||6.0)-6.5)*4.0;const ppg=d.ppg||70;const opp=d.opp||68;return{...d,ppg:Math.max(55,ppg+delta*0.60),opp:Math.max(45,opp-delta*0.40),tempo:d.tempo||68,sos_rating:sos};};
   const safeData=(d)=>({...d,ppg:d.ppg||70,opp:d.opp||68,tempo:d.tempo||68,efg_pct:d.efg_pct||0.50,opp_efg_pct:d.opp_efg_pct||0.50,tov_rate:d.tov_rate||18,opp_tov_rate:d.opp_tov_rate||18,oreb_pct:d.oreb_pct||0.28,opp_oreb_pct:d.opp_oreb_pct||0.28,ft_rate:d.ft_rate||0.30,opp_ft_rate:d.opp_ft_rate||0.30,opp_ftr:d.opp_ftr||d.opp_ft_rate||0.30,opp_3p_pct:d.opp_3p_pct||0.335,conf_tourney_winner:d.conf_tourney_winner||false,margin_stddev:d.margin_stddev||10,kenpom_rank:d.kenpom_rank||150,roster:d.roster||[]});
   const runGame=(t1,t2,round)=>{
     if(t1.data&&t2.data){

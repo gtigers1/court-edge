@@ -27,8 +27,9 @@ export default async function handler(req, res) {
       (r.name||"").toLowerCase().includes("net")
     )?.current || null;
 
-    // ── 2. ESPN: schedule → rest days + rolling Elo ─────────────────────────
+    // ── 2. ESPN: schedule → rest days + rolling Elo + real PPG/OPP from scores ─
     let daysSinceLastGame = 2, teamElo = 1500, teamGames = [];
+    let sSF = 0, sAG = 0, sCnt = 0; // season scoring from real game scores
     try {
       const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}/schedule`);
       const schedJson = await schedResp.json();
@@ -46,6 +47,8 @@ export default async function handler(req, res) {
         const theirs = comp.competitors?.find(c => String(c.id) !== teamNumId);
         if (!ours || !theirs || ours.score == null || theirs.score == null) continue;
         const s = parseFloat(ours.score)||0, t = parseFloat(theirs.score)||0;
+        // Accumulate real game scores for PPG/OPP (more reliable than AI search)
+        if (s > 0 || t > 0) { sSF += s; sAG += t; sCnt++; }
         const win    = s > t ? 1 : 0;
         const isHome = ours.homeAway === "home";
         if (theirs.id) teamGames.push({ opp: String(theirs.id), win: win === 1 });
@@ -63,6 +66,9 @@ export default async function handler(req, res) {
         teamGames._marginStddev = parseFloat(Math.sqrt(variance).toFixed(1));
       }
     } catch(_) {}
+    // Real scoring averages from ESPN game logs (overrides AI hallucinations)
+    const schedPPG = sCnt >= 10 ? parseFloat((sSF / sCnt).toFixed(1)) : null;
+    const schedOPP = sCnt >= 10 ? parseFloat((sAG / sCnt).toFixed(1)) : null;
 
     // ── 3. Extract player IDs + names from roster ────────────────────────────
     const athletes = rosterJson?.athletes || [];
@@ -236,8 +242,9 @@ Rules:
     // ── 7. Apply team stat defaults ──────────────────────────────────────────
     parsed.wins          = parsed.wins          || wins;
     parsed.losses        = parsed.losses        || losses;
-    parsed.ppg           = parsed.ppg           || 75;
-    parsed.opp           = parsed.opp           || 70;
+    // ESPN real game scores are authoritative — prevents AI from hallucinating PPG/OPP
+    parsed.ppg           = schedPPG             || parsed.ppg || 75;
+    parsed.opp           = schedOPP             || parsed.opp || 70;
     parsed.tempo         = parsed.tempo         || 68;
     parsed.efg_pct       = parsed.efg_pct       || 0.52;
     parsed.tov_rate      = parsed.tov_rate      || 16;

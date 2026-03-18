@@ -837,10 +837,11 @@ function ncaamMdlPythagorean(h,a,neutral=true){
   // SOS via KenPom rank (schedule quality correction)
   const hSOS=Math.max(0.90,Math.min(1.10,1+(175-Math.min(h.kenpom_rank||150,350))*0.0015));
   const aSOS=Math.max(0.90,Math.min(1.10,1+(175-Math.min(a.kenpom_rank||150,350))*0.0015));
-  const hQ=Math.min(0.97,hP*hSOS);
-  const aQ=Math.min(0.97,aP*aSOS);
+  // No intermediate cap: both strong teams hitting 0.97 ceiling erases Duke vs Siena difference
+  const hQ=hP*hSOS;
+  const aQ=aP*aSOS;
   // Neutral site: no HCA boost; home game: +3.5pt
-  const hAdj=neutral?hQ:Math.min(0.97,hQ*0.65+pythagorean(h.ppg+3.5,h.opp,12.0)*0.35);
+  const hAdj=neutral?hQ:hQ*0.65+pythagorean(h.ppg+3.5,h.opp,12.0)*0.35;
   const hi=injPen(h.roster,0.10,0.05,0.015);
   const ai=injPen(a.roster,0.10,0.05,0.015);
   // Direct logistic on win% difference: more accurate for single games than Log5 (series formula)
@@ -945,13 +946,13 @@ const CONF_STRENGTH={
   "NEC":3.8,"SWAC":3.5,"MEAC":3.5,
 };
 // Model 6: Conference Strength (schedule-context-adjusted net rating)
-// Net Rating alone conflates a Big Ten #50 with a Summit #50 — they face very different schedules.
-// Conference tier adjusts for the QUALITY DISTRIBUTION of opponents beyond just KenPom rank.
-// This adds signal orthogonal to tempo-normalized AdjEff (Model 1).
+// Receives conference-NORMALIZED PPG/OPP (already adjusted for schedule difficulty).
+// confBonus adds residual conference-quality premium: clutch experience, coaching depth, etc.
+// Using raw stats here caused MAAC teams (~+20 raw net) to outshine ACC teams (~+12 raw net).
 function ncaamMdlConferenceStrength(h,a){
   const hCS=CONF_STRENGTH[h.conf]||5.5;
   const aCS=CONF_STRENGTH[a.conf]||5.5;
-  // Each conf-tier point ≈ 0.55 pts of net-rating advantage (empirically: Big Ten vs mid-major ≈ 2-3pts)
+  // Small bonus on top of normalization: captures coaching/depth/pressure-game experience
   const confBonus=(hCS-aCS)*0.55;
   // Note: KenPom rank SOS intentionally excluded here — Efficiency model already uses rank.
   // Conference Strength should be purely tier-based to stay orthogonal to Model 1.
@@ -1142,8 +1143,8 @@ function NCAAMPage(){
       const ff=ncaamMdlFourFactors(homeData,awayData,true);
       const tal=ncaamMdlTalent(homeData,awayData,true);
       const mc=ncaamMdlMonteCarlo(hNorm,aNorm,10000,true);
-      // Conference Strength uses its own conference-bonus formula on original data
-      const cs=ncaamMdlConferenceStrength({...homeData,conf:homeTeam?.conf},{...awayData,conf:awayTeam?.conf});
+      // Conference Strength uses normalized stats: raw MAAC PPG (~+20 net) would overwhelm confBonus
+      const cs=ncaamMdlConferenceStrength(hNorm,aNorm);
       const sa=ncaamMdlSeedAnchor(homeData,awayData,awaySeed,homeSeed);
       // Luck Adjusted uses normalized stats so Pythagorean regression is on schedule-corrected data
       const la=ncaamMdlLuckAdjusted(hNorm,aNorm);
@@ -1769,7 +1770,7 @@ function NCAATreePage(){
       const eff=ncaamMdlEfficiency(hNorm,aNorm,true);const pyth=ncaamMdlPythagorean(hNorm,aNorm,true);
       const ff=ncaamMdlFourFactors(sd1,sd2,true);const tal=ncaamMdlTalent(sd1,sd2,true);
       const mc=ncaamMdlMonteCarlo(hNorm,aNorm,3000,true);
-      const cs=ncaamMdlConferenceStrength({...sd1,conf:t1.teamObj.conf},{...sd2,conf:t2.teamObj.conf});
+      const cs=ncaamMdlConferenceStrength(hNorm,aNorm);
       const sa=ncaamMdlSeedAnchor(sd1,sd2,t2.seed,t1.seed);const la=ncaamMdlLuckAdjusted(hNorm,aNorm);
       const allPs=[eff,pyth,ff,tal,mc,cs,sa,la].filter(Boolean).map(m=>m.homeProb).filter(v=>!isNaN(v)&&isFinite(v));
       if(!allPs.length)return{p:treeProb(t1.seed,t2.seed),dataMode:false};

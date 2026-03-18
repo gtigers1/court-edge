@@ -2252,10 +2252,10 @@ function NCAAOraclePage(){
                 </div>
               </div>
             </div>
-            <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12}}>
               <SectionHeader label={activeRegion+" Region — Edit Seeds"} accent={ac}
                 right={<span style={{fontSize:10,color:C.muted}}>Predictions update instantly as you assign teams</span>}/>
-              <div style={{padding:12}}><SetupGrid region={activeRegion}/></div>
+              <div style={{padding:12,overflow:"visible"}}><SetupGrid region={activeRegion}/></div>
             </div>
           </div>
         );
@@ -2369,10 +2369,10 @@ function NCAAOraclePage(){
 
       {/* ── Region setup (always shown when results exist, for quick edits) ── */}
       {simResults&&(
-        <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+        <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12}}>
           <SectionHeader label={activeRegion+" Region — Edit Bracket"} accent={ac}
             right={<span style={{fontSize:10,color:C.muted}}>Editing resets results · re-simulate after changes</span>}/>
-          <div style={{padding:12}}><SetupGrid region={activeRegion}/></div>
+          <div style={{padding:12,overflow:"visible"}}><SetupGrid region={activeRegion}/></div>
         </div>
       )}
     </div>

@@ -1825,6 +1825,22 @@ function NCAATreePage(){
   const confNormFn=(d,conf,teamName)=>{const sos=SOS_RATINGS[teamName]??null;const delta=sos!=null?(sos-3)*0.7:((CONF_STRENGTH[conf]||6.0)-6.5)*4.0;const ppg=d.ppg||70;const opp=d.opp||68;return{...d,ppg:Math.max(55,ppg+delta*0.60),opp:Math.max(45,opp-delta*0.40),tempo:d.tempo||68,sos_rating:sos};};
   const safeData=(d)=>({...d,ppg:d.ppg||70,opp:d.opp||68,tempo:d.tempo||68,efg_pct:d.efg_pct||0.50,opp_efg_pct:d.opp_efg_pct||0.50,tov_rate:d.tov_rate||18,opp_tov_rate:d.opp_tov_rate||18,oreb_pct:d.oreb_pct||0.28,opp_oreb_pct:d.opp_oreb_pct||0.28,ft_rate:d.ft_rate||0.30,opp_ft_rate:d.opp_ft_rate||0.30,opp_ftr:d.opp_ftr||d.opp_ft_rate||0.30,opp_3p_pct:d.opp_3p_pct||0.335,conf_tourney_winner:d.conf_tourney_winner||false,margin_stddev:d.margin_stddev||10,kenpom_rank:d.kenpom_rank||150,roster:d.roster||[]});
   const runGame=(t1,t2,round)=>{
+    // Cinderella momentum scale by round — from 10-tournament analysis (2015–2024):
+    // S16/R32: full boost valid (~45-50% win rate for high seeds, momentum is real)
+    // E8:  reduced 50% — high seeds win ~50% but against elite opponents, luck still matters
+    // F4:  ZERO — 11+ seeds went 0-4 in semifinals (Loyola '18, UCLA '21, FAU '23, NC State '24)
+    //       At this stage the 8-model consensus drives the result; luck narrative has expired.
+    // CHAMP: zero — no 11+ seed has won a national championship
+    const cScale={R32:1.0,S16:1.0,E8:0.50,F4:0.0,CHAMP:0.0}[round]??1.0;
+    const applySurvivor=(p)=>{
+      if(cScale===0)return p;
+      const t1Under=t1.seed>t2.seed,t2Under=t2.seed>t1.seed;
+      const t1Rw=t1.roundsWon||0,t2Rw=t2.roundsWon||0;
+      // Boost kicks in after 2+ rounds won (entering S16 or later)
+      if(t1Under&&t1Rw>=2)p=Math.min(0.97,p+cScale*0.05*Math.min(t1Rw-1,3));
+      if(t2Under&&t2Rw>=2)p=Math.max(0.03,p-cScale*0.05*Math.min(t2Rw-1,3));
+      return p;
+    };
     if(t1.data&&t2.data){
       const sd1=safeData(t1.data),sd2=safeData(t2.data);
       const hNorm=confNormFn({...sd1,conf:t1.teamObj.conf},t1.teamObj.conf,t1.teamObj.name);
@@ -1835,23 +1851,17 @@ function NCAATreePage(){
       const cs=ncaamMdlConferenceStrength(hNorm,aNorm);
       const sa=ncaamMdlSeedAnchor(sd1,sd2,t2.seed,t1.seed);const la=ncaamMdlLuckAdjusted(hNorm,aNorm);
       const allPs=[eff,pyth,ff,tal,mc,cs,sa,la].filter(Boolean).map(m=>m.homeProb).filter(v=>!isNaN(v)&&isFinite(v));
-      if(!allPs.length)return{p:treeProb(t1.seed,t2.seed),dataMode:false};
+      if(!allPs.length)return{p:applySurvivor(treeProb(t1.seed,t2.seed)),dataMode:false};
       const cons=ncaamConsensus(allPs,null,round);
       const gap=Math.abs(t1.seed-t2.seed);
       const histWeight=Math.min(0.40,gap*0.03);
       const hist=treeProb(t1.seed,t2.seed);
-      let finalP=Math.min(0.97,Math.max(0.03,cons*(1-histWeight)+hist*histWeight));
-      // Survivor discount: underdog who has won multiple rounds as upset gets a momentum boost.
-      // NC State (11), FAU (9), UCLA (11) — survivors prove they're better than their seed.
-      const t1Under=t1.seed>t2.seed, t2Under=t2.seed>t1.seed;
-      const t1Rw=t1.roundsWon||0, t2Rw=t2.roundsWon||0;
-      if(t1Under&&t1Rw>=2)finalP=Math.min(0.97,finalP+0.05*Math.min(t1Rw-1,3));
-      if(t2Under&&t2Rw>=2)finalP=Math.max(0.03,finalP-0.05*Math.min(t2Rw-1,3));
-      return{p:finalP,dataMode:true};
+      const base=Math.min(0.97,Math.max(0.03,cons*(1-histWeight)+hist*histWeight));
+      return{p:applySurvivor(base),dataMode:true};
     }
     const lo=Math.min(t1.seed,t2.seed),hi=Math.max(t1.seed,t2.seed);
     const base=TREE_HIST[lo+"-"+hi]!=null?TREE_HIST[lo+"-"+hi]:Math.min(0.97,Math.max(0.40,logistic((hi-lo)*0.20)));
-    return{p:t1.seed===lo?base:1-base,dataMode:false};
+    return{p:applySurvivor(t1.seed===lo?base:1-base),dataMode:false};
   };
   const adv=(team,g)=>({...team,roundsWon:(team.roundsWon||0)+1});
   const computeBracket=(region,cs,cstore)=>{

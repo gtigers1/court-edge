@@ -1755,7 +1755,12 @@ function NCAATreePage(){
       const sa=ncaamMdlSeedAnchor(sd1,sd2,t2.seed,t1.seed);const la=ncaamMdlLuckAdjusted(hNorm,aNorm);
       const allPs=[eff,pyth,ff,tal,mc,cs,sa,la].filter(Boolean).map(m=>m.homeProb).filter(v=>!isNaN(v)&&isFinite(v));
       if(!allPs.length)return{p:treeProb(t1.seed,t2.seed),dataMode:false};
-      const cons=ncaamConsensus(allPs,null,round);return{p:cons,dataMode:true};
+      const cons=ncaamConsensus(allPs,null,round);
+      const gap=Math.abs(t1.seed-t2.seed);
+      const histWeight=Math.min(0.40,gap*0.03);
+      const hist=treeProb(t1.seed,t2.seed);
+      const finalP=Math.min(0.97,Math.max(0.03,cons*(1-histWeight)+hist*histWeight));
+      return{p:finalP,dataMode:true};
     }
     const lo=Math.min(t1.seed,t2.seed),hi=Math.max(t1.seed,t2.seed);
     const base=TREE_HIST[lo+"-"+hi]!=null?TREE_HIST[lo+"-"+hi]:Math.min(0.97,Math.max(0.40,logistic((hi-lo)*0.20)));

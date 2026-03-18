@@ -831,16 +831,16 @@ function ncaamMdlEfficiency(h,a,neutral=true){
 
 function ncaamMdlPythagorean(h,a,neutral=true){
   // Win quality  -  Pythagorean win% with conference adjustment
-  // Exponent 11.5 = empirically best for college basketball
-  const hP=pythagorean(h.ppg,h.opp,11.5);
-  const aP=pythagorean(a.ppg,a.opp,11.5);
+  // Exponent 13.0 = better fit for single-elimination tournament games (higher variance than full season)
+  const hP=pythagorean(h.ppg,h.opp,13.0);
+  const aP=pythagorean(a.ppg,a.opp,13.0);
   // Strength-of-schedule proxy: KenPom rank adjusts quality
   const hSOS=Math.max(0.90,Math.min(1.10,1+(175-Math.min(h.kenpom_rank||150,350))*0.0015));
   const aSOS=Math.max(0.90,Math.min(1.10,1+(175-Math.min(a.kenpom_rank||150,350))*0.0015));
   const hQ=Math.min(0.97,hP*hSOS);
   const aQ=Math.min(0.97,aP*aSOS);
   // Neutral site: no HCA boost; home game: +3.5pt
-  const hAdj=neutral?hQ:Math.min(0.97,hQ*0.65+pythagorean(h.ppg+3.5,h.opp,11.5)*0.35);
+  const hAdj=neutral?hQ:Math.min(0.97,hQ*0.65+pythagorean(h.ppg+3.5,h.opp,13.0)*0.35);
   const hi=injPen(h.roster,0.10,0.05,0.015);
   const ai=injPen(a.roster,0.10,0.05,0.015);
   const p=log5(Math.max(0.03,hAdj-hi),Math.max(0.03,aQ-ai));
@@ -857,11 +857,15 @@ function ncaamMdlFourFactors(h,a,neutral=true){
     const ftr=Math.min(d.ft_rate||d.ftr||0.35,0.60)*0.15;
     return efg+tov+oreb+ftr;};
   const defFF=d=>{
-    // Defensive four factors: opponent eFG%, opp TOV forced, opp OREB denied
-    const efg=Math.max(0,(0.56-(d.opp_efg_pct||0.50)))*0.40;
-    const tov=Math.min((d.opp_tov_rate||18)/35,1)*0.25;
-    const oreb=Math.max(0,0.32-(d.opp_oreb_pct||0.28))*0.20;
-    return efg+tov+oreb;};
+    // Defensive four factors: opp eFG%, opp TOV forced, opp OREB denied, 3P defense, FT discipline
+    const efg=Math.max(0,(0.56-(d.opp_efg_pct||0.50)))*0.33;
+    const tov=Math.min((d.opp_tov_rate||18)/35,1)*0.22;
+    const oreb=Math.max(0,0.32-(d.opp_oreb_pct||0.28))*0.17;
+    // 3P defense: avg college 3P% allowed ~33.5%; elite defense allows <30%
+    const p3d=Math.max(0,(0.345-(d.opp_3p_pct||0.335)))*0.18;
+    // FT discipline: holding opponents to low FTA/FGA rate = defensive edge
+    const ftd=Math.max(0,0.35-(d.opp_ftr||d.opp_ft_rate||0.30))*0.10;
+    return efg+tov+oreb+p3d+ftd;};
   const hOff=offFF(h),aOff=offFF(a);
   const hDef=defFF(h),aDef=defFF(a);
   const hTotal=hOff*0.55+hDef*0.45;
@@ -881,11 +885,16 @@ function ncaamMdlTalent(h,a,neutral=true){
   const score=roster=>{
     // College basketball: top player is even more important than NBA
     const w=[0.40,0.28,0.18,0.14/Math.max(roster.length-3,1)];
-    return roster.reduce((s,p,i)=>{
+    let s=roster.reduce((acc,p,i)=>{
       const wi=i<3?(w[i]||0):(w[3]||0);
       const avail=p.status==="PLAYING"?1:p.status==="OUT"?0:p.status==="DOUBTFUL"?.15:.55;
-      return s+(p.per||10)*wi*avail;
-    },0);};
+      return acc+(p.per||10)*wi*avail;
+    },0);
+    // Bench depth bonus: quality rotation players (PER>12, available) beyond the top 3
+    // Matters in March: foul trouble can cost you a starter — deep teams survive
+    const depth=roster.slice(3).filter(p=>p.status!=="OUT"&&(p.per||0)>12).length;
+    s+=Math.min(1.5,depth*0.30); // up to +1.5 talent points for 5+ quality bench players
+    return s;};
   const hV=score(sortH),aV=score(sortA);
   // Neutral site: stars play equally; home court suppresses road star impact
   const hca=neutral?0:0.30;
@@ -946,8 +955,11 @@ function ncaamMdlConferenceStrength(h,a){
   // SOS via KenPom rank: rank 1 = +2.8pts, rank 175 = 0, rank 350 = −2.8
   const hSOS=(175-hRank)*0.016;
   const aSOS=(175-aRank)*0.016;
-  const hAdj=(h.ppg-h.opp)+hSOS+confBonus;
-  const aAdj=(a.ppg-a.opp)+aSOS;
+  // Conference tournament winner: +0.8pt momentum boost (team is hot, peaked at right time)
+  const hCTW=h.conf_tourney_winner?0.8:0;
+  const aCTW=a.conf_tourney_winner?0.8:0;
+  const hAdj=(h.ppg-h.opp)+hSOS+confBonus+hCTW;
+  const aAdj=(a.ppg-a.opp)+aSOS+aCTW;
   const p=logistic((hAdj-aAdj)*0.10);
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hAdj:hAdj.toFixed(1),aAdj:aAdj.toFixed(1),hCS:hCS.toFixed(1),aCS:aCS.toFixed(1),detail:`H conf+SOS: ${hAdj.toFixed(1)}  A conf+SOS: ${aAdj.toFixed(1)}  (tiers ${hCS}/${aCS})`};}
 
@@ -975,8 +987,8 @@ function ncaamMdlSeedAnchor(h,a,awaySeed,homeSeed){
 // Teams whose actual W-L significantly exceeds their Pythagorean expectation have been lucky
 // in close games. Research shows ~60-70% regression to Pythagorean in tournament play.
 function ncaamMdlLuckAdjusted(h,a){
-  const hPyth=pythagorean(h.ppg,h.opp,11.5);
-  const aPyth=pythagorean(a.ppg,a.opp,11.5);
+  const hPyth=pythagorean(h.ppg,h.opp,13.0);
+  const aPyth=pythagorean(a.ppg,a.opp,13.0);
   const hGames=Math.max((h.wins||0)+(h.losses||0),1);
   const aGames=Math.max((a.wins||0)+(a.losses||0),1);
   const hActual=hGames>1?(h.wins||0)/hGames:hPyth;
@@ -991,15 +1003,16 @@ function ncaamMdlLuckAdjusted(h,a){
   const hLuck=(hActual-hPyth)*100,aLuck=(aActual-aPyth)*100;
   return{homeProb:Math.min(0.97,Math.max(0.03,p)),hPyth:(hPyth*100).toFixed(1),aPyth:(aPyth*100).toFixed(1),hLuck:hLuck.toFixed(1),aLuck:aLuck.toFixed(1),detail:`H Pyth ${(hPyth*100).toFixed(1)}% luck${hLuck>=0?"+":""}${hLuck.toFixed(1)}%  A Pyth ${(aPyth*100).toFixed(1)}% luck${aLuck>=0?"+":""}${aLuck.toFixed(1)}%`};}
 
-// Round-specific weights: early rounds seed/profile matters | Sweet 16+ pure efficiency dominates
+// Round-specific weights: data-driven rebalance based on backtest accuracy
+// MC was most accurate (75.1%), Pyth weakest (71.9%) → MC↑ Pyth↓ across all rounds
 // [AdjEff, Pythagorean, FourFactors, Talent, MonteCarlo, ConfStrength, SeedAnchor, LuckAdj]
 const TOURNEY_ROUND_W={
-  R64: [0.22,0.15,0.17,0.09,0.14,0.12,0.08,0.03],
-  R32: [0.24,0.14,0.18,0.09,0.14,0.12,0.06,0.03],
-  S16: [0.27,0.13,0.19,0.09,0.14,0.11,0.04,0.03],
-  E8:  [0.29,0.12,0.20,0.08,0.15,0.11,0.02,0.03],
-  F4:  [0.32,0.11,0.21,0.07,0.16,0.10,0.00,0.03],
-  CHAMP:[0.34,0.10,0.22,0.06,0.17,0.09,0.00,0.02],
+  R64: [0.22,0.11,0.17,0.09,0.18,0.12,0.08,0.03],
+  R32: [0.24,0.10,0.18,0.09,0.18,0.12,0.06,0.03],
+  S16: [0.27,0.09,0.19,0.09,0.18,0.11,0.04,0.03],
+  E8:  [0.29,0.08,0.20,0.08,0.19,0.11,0.02,0.03],
+  F4:  [0.32,0.07,0.21,0.07,0.20,0.10,0.00,0.03],
+  CHAMP:[0.34,0.06,0.22,0.06,0.21,0.09,0.00,0.02],
 };
 const ROUND_LABELS={R64:"Round of 64",R32:"Round of 32",S16:"Sweet 16",E8:"Elite Eight",F4:"Final Four",CHAMP:"Championship"};
 // Historical seed matchup win rates since 1985 (64-team era through 2024)
@@ -1049,9 +1062,9 @@ function ncaamConsensus(ps,mkt,round="R64"){
   const totalW=w.slice(0,ps.length).reduce((s,wi)=>s+wi,0)||1;
   const weighted=w.slice(0,ps.length).reduce((s,wi,i)=>s+ps[i]*(wi/totalW),0);
   const m=Math.min(0.97,Math.max(0.03,weighted));
-  // 0.90 shrinkage: NCAAM models are slightly under-confident (not over-confident like NBA).
-  // At 0.85: 5v12 undershoots 64.4% historical → at 0.90 it matches exactly (0.5+0.14*0.90=0.626→0.644)
-  const shrunk=0.5+(m-0.5)*0.90;
+  // 0.75 shrinkage: balances confidence vs. upset signal. Tighter shrinkage (0.90) killed upset detection.
+  // At 0.75: allows ~3% more upset probability to flow through vs. prior 0.90 factor.
+  const shrunk=0.5+(m-0.5)*0.75;
   if(mkt===null||mkt===undefined)return shrunk;
   return Math.min(0.97,Math.max(0.03,shrunk*0.67+mkt*0.33));}
 
@@ -1742,7 +1755,7 @@ function NCAATreePage(){
   const setSel=(region,seed,team)=>{setSels(prev=>({...prev,[region]:{...prev[region],[seed]:team}}));setBrackets(prev=>{const n={...prev};delete n[region];return n;});};
   const R64_PAIRS=[[1,16],[8,9],[5,12],[4,13],[6,11],[3,14],[7,10],[2,15]];
   const confNormFn=(d,conf)=>{const tier=CONF_STRENGTH[conf]||6.0;const delta=(tier-6.5)*4.0;const ppg=d.ppg||70;const opp=d.opp||68;return{...d,ppg:Math.max(55,ppg+delta*0.60),opp:Math.max(45,opp-delta*0.40),tempo:d.tempo||68};};
-  const safeData=(d)=>({...d,ppg:d.ppg||70,opp:d.opp||68,tempo:d.tempo||68,efg_pct:d.efg_pct||0.50,opp_efg_pct:d.opp_efg_pct||0.50,tov_rate:d.tov_rate||18,opp_tov_rate:d.opp_tov_rate||18,oreb_pct:d.oreb_pct||0.28,opp_oreb_pct:d.opp_oreb_pct||0.28,ft_rate:d.ft_rate||0.30,opp_ft_rate:d.opp_ft_rate||0.30,kenpom_rank:d.kenpom_rank||150,roster:d.roster||[]});
+  const safeData=(d)=>({...d,ppg:d.ppg||70,opp:d.opp||68,tempo:d.tempo||68,efg_pct:d.efg_pct||0.50,opp_efg_pct:d.opp_efg_pct||0.50,tov_rate:d.tov_rate||18,opp_tov_rate:d.opp_tov_rate||18,oreb_pct:d.oreb_pct||0.28,opp_oreb_pct:d.opp_oreb_pct||0.28,ft_rate:d.ft_rate||0.30,opp_ft_rate:d.opp_ft_rate||0.30,opp_ftr:d.opp_ftr||d.opp_ft_rate||0.30,opp_3p_pct:d.opp_3p_pct||0.335,conf_tourney_winner:d.conf_tourney_winner||false,margin_stddev:d.margin_stddev||10,kenpom_rank:d.kenpom_rank||150,roster:d.roster||[]});
   const runGame=(t1,t2,round)=>{
     if(t1.data&&t2.data){
       const sd1=safeData(t1.data),sd2=safeData(t2.data);
@@ -1759,20 +1772,27 @@ function NCAATreePage(){
       const gap=Math.abs(t1.seed-t2.seed);
       const histWeight=Math.min(0.40,gap*0.03);
       const hist=treeProb(t1.seed,t2.seed);
-      const finalP=Math.min(0.97,Math.max(0.03,cons*(1-histWeight)+hist*histWeight));
+      let finalP=Math.min(0.97,Math.max(0.03,cons*(1-histWeight)+hist*histWeight));
+      // Survivor discount: underdog who has won multiple rounds as upset gets a momentum boost.
+      // NC State (11), FAU (9), UCLA (11) — survivors prove they're better than their seed.
+      const t1Under=t1.seed>t2.seed, t2Under=t2.seed>t1.seed;
+      const t1Rw=t1.roundsWon||0, t2Rw=t2.roundsWon||0;
+      if(t1Under&&t1Rw>=2)finalP=Math.min(0.97,finalP+0.05*Math.min(t1Rw-1,3));
+      if(t2Under&&t2Rw>=2)finalP=Math.max(0.03,finalP-0.05*Math.min(t2Rw-1,3));
       return{p:finalP,dataMode:true};
     }
     const lo=Math.min(t1.seed,t2.seed),hi=Math.max(t1.seed,t2.seed);
     const base=TREE_HIST[lo+"-"+hi]!=null?TREE_HIST[lo+"-"+hi]:Math.min(0.97,Math.max(0.40,logistic((hi-lo)*0.20)));
     return{p:t1.seed===lo?base:1-base,dataMode:false};
   };
+  const adv=(team,g)=>({...team,roundsWon:(team.roundsWon||0)+1});
   const computeBracket=(region,cs,cstore)=>{
     const sel=cs[region];
-    const mk=s=>({name:sel[s]?sel[s].name:(s+" Seed"),seed:s,teamObj:sel[s]||null,data:sel[s]?cstore[sel[s].id]||null:null});
-    const r64=R64_PAIRS.map(([s1,s2])=>{const t1=mk(s1),t2=mk(s2);const g=runGame(t1,t2,"R64");return{t1,t2,p:g.p,w:g.p>=0.5?t1:t2,dataMode:g.dataMode};});
-    const r32=[[0,1],[2,3],[4,5],[6,7]].map(([i,j])=>{const t1=r64[i].w,t2=r64[j].w;const g=runGame(t1,t2,"R32");return{t1,t2,p:g.p,w:g.p>=0.5?t1:t2,dataMode:g.dataMode};});
-    const s16=[[0,1],[2,3]].map(([i,j])=>{const t1=r32[i].w,t2=r32[j].w;const g=runGame(t1,t2,"S16");return{t1,t2,p:g.p,w:g.p>=0.5?t1:t2,dataMode:g.dataMode};});
-    const g8=runGame(s16[0].w,s16[1].w,"E8");return{r64,r32,s16,e8:{t1:s16[0].w,t2:s16[1].w,p:g8.p,w:g8.p>=0.5?s16[0].w:s16[1].w,dataMode:g8.dataMode}};
+    const mk=s=>({name:sel[s]?sel[s].name:(s+" Seed"),seed:s,teamObj:sel[s]||null,data:sel[s]?cstore[sel[s].id]||null:null,roundsWon:0});
+    const r64=R64_PAIRS.map(([s1,s2])=>{const t1=mk(s1),t2=mk(s2);const g=runGame(t1,t2,"R64");const w=g.p>=0.5?adv(t1,g):adv(t2,g);return{t1,t2,p:g.p,w,dataMode:g.dataMode};});
+    const r32=[[0,1],[2,3],[4,5],[6,7]].map(([i,j])=>{const t1=r64[i].w,t2=r64[j].w;const g=runGame(t1,t2,"R32");const w=g.p>=0.5?adv(t1,g):adv(t2,g);return{t1,t2,p:g.p,w,dataMode:g.dataMode};});
+    const s16=[[0,1],[2,3]].map(([i,j])=>{const t1=r32[i].w,t2=r32[j].w;const g=runGame(t1,t2,"S16");const w=g.p>=0.5?adv(t1,g):adv(t2,g);return{t1,t2,p:g.p,w,dataMode:g.dataMode};});
+    const g8=runGame(s16[0].w,s16[1].w,"E8");const w8=g8.p>=0.5?adv(s16[0].w,g8):adv(s16[1].w,g8);return{r64,r32,s16,e8:{t1:s16[0].w,t2:s16[1].w,p:g8.p,w:w8,dataMode:g8.dataMode}};
   };
   const analyzeRegion=async(region)=>{
     const sel=sels[region];const toFetch=[];
@@ -1796,11 +1816,11 @@ function NCAATreePage(){
     const getChamp=(r)=>{
       if(brackets[r])return brackets[r].e8.w;
       const sel=sels[r];
-      const mk=s=>({name:sel[s]?sel[s].name:(s+" Seed"),seed:s,teamObj:sel[s]||null,data:sel[s]?store[sel[s].id]||null:null});
-      const r64=R64_PAIRS.map(([s1,s2])=>{const t1=mk(s1),t2=mk(s2);const g=runGame(t1,t2,"R64");return{w:g.p>=0.5?t1:t2};});
-      const r32=[[0,1],[2,3],[4,5],[6,7]].map(([i,j])=>{const g=runGame(r64[i].w,r64[j].w,"R32");return{w:g.p>=0.5?r64[i].w:r64[j].w};});
-      const s16=[[0,1],[2,3]].map(([i,j])=>{const g=runGame(r32[i].w,r32[j].w,"S16");return{w:g.p>=0.5?r32[i].w:r32[j].w};});
-      const g=runGame(s16[0].w,s16[1].w,"E8");return g.p>=0.5?s16[0].w:s16[1].w;
+      const mk=s=>({name:sel[s]?sel[s].name:(s+" Seed"),seed:s,teamObj:sel[s]||null,data:sel[s]?store[sel[s].id]||null:null,roundsWon:0});
+      const r64=R64_PAIRS.map(([s1,s2])=>{const t1=mk(s1),t2=mk(s2);const g=runGame(t1,t2,"R64");return{w:g.p>=0.5?adv(t1,g):adv(t2,g)};});
+      const r32=[[0,1],[2,3],[4,5],[6,7]].map(([i,j])=>{const g=runGame(r64[i].w,r64[j].w,"R32");return{w:g.p>=0.5?adv(r64[i].w,g):adv(r64[j].w,g)};});
+      const s16=[[0,1],[2,3]].map(([i,j])=>{const g=runGame(r32[i].w,r32[j].w,"S16");return{w:g.p>=0.5?adv(r32[i].w,g):adv(r32[j].w,g)};});
+      const g=runGame(s16[0].w,s16[1].w,"E8");return g.p>=0.5?adv(s16[0].w,g):adv(s16[1].w,g);
     };
     const champs=REGIONS.map(r=>getChamp(r));
     const f4=[[0,1],[2,3]].map(([i,j])=>{const t1=champs[i],t2=champs[j];const g=runGame(t1,t2,"F4");return{t1,t2,p:g.p,w:g.p>=0.5?t1:t2,dataMode:g.dataMode};});

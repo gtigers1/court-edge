@@ -38,6 +38,7 @@ export default async function handler(req, res) {
         daysSinceLastGame = Math.max(0, Math.floor((new Date() - lastDate) / (1000 * 60 * 60 * 24)));
       }
       const ELO_K = 30;
+      const margins = [];
       for (const ev of completed) {
         const comp  = ev.competitions?.[0];
         if (!comp) continue;
@@ -48,9 +49,18 @@ export default async function handler(req, res) {
         const win    = s > t ? 1 : 0;
         const isHome = ours.homeAway === "home";
         if (theirs.id) teamGames.push({ opp: String(theirs.id), win: win === 1 });
+        margins.push(s - t);
         const effElo   = teamElo + (isHome ? 50 : -50);
         const expected = 1 / (1 + Math.pow(10, (1500 - effElo) / 400));
         teamElo += ELO_K * Math.max(0.5, Math.log(Math.abs(s-t)+1)/Math.log(15)) * (win - expected);
+      }
+      // Margin of victory std dev: low = consistent, high = volatile
+      if (margins.length > 3) {
+        const mean = margins.reduce((a,b)=>a+b,0)/margins.length;
+        daysSinceLastGame = daysSinceLastGame; // already set
+        const variance = margins.reduce((s,m)=>s+Math.pow(m-mean,2),0)/margins.length;
+        // attach to a temp var; applied below after parsed
+        teamGames._marginStddev = parseFloat(Math.sqrt(variance).toFixed(1));
       }
     } catch(_) {}
 
@@ -149,6 +159,7 @@ export default async function handler(req, res) {
       wins:0, losses:0, ppg:75.0, opp:70.0, tempo:68.0,
       efg_pct:0.52, tov_rate:16.0, oreb_pct:0.30, ft_rate:0.35,
       opp_efg_pct:0.50, opp_tov_rate:16.0, opp_oreb_pct:0.28,
+      opp_3p_pct:0.335, opp_ftr:0.30, conf_tourney_winner:false,
       conference:"Big Ten", ranking:0, kenpom_rank:100
     });
 
@@ -165,6 +176,9 @@ export default async function handler(req, res) {
       "ppg/opp: team season scoring averages",
       "tempo: possessions per 40 min (KenPom or Barttorvik)",
       "efg_pct as decimal (0.52 = 52%)",
+      "opp_3p_pct: opponent 3-point % allowed this season (decimal, e.g. 0.320 = elite, 0.345 = average)",
+      "opp_ftr: opponent free throw attempts / opponent field goal attempts (decimal, e.g. 0.28)",
+      "conf_tourney_winner: true if team won their conference tournament this season",
       "ranking: AP poll rank, 0 if unranked",
       "kenpom_rank: KenPom or NET rank (1-364)",
       "roster.status: search injury report — OUT=out/injured/suspended, DOUBTFUL=doubtful, QUESTIONABLE=day-to-day, PLAYING=healthy",
@@ -174,7 +188,7 @@ export default async function handler(req, res) {
     const userPrompt = `Search for current 2025-26 NCAA basketball stats and injury report for ${team}.
 
 Return ONLY this JSON (fill in all values):
-{"wins":0,"losses":0,"ppg":0,"opp":0,"tempo":0,"efg_pct":0,"tov_rate":0,"oreb_pct":0,"ft_rate":0,"opp_efg_pct":0,"opp_tov_rate":0,"opp_oreb_pct":0,"conference":"","ranking":0,"kenpom_rank":0,"roster":[${rosterSchemaBlock}]}
+{"wins":0,"losses":0,"ppg":0,"opp":0,"tempo":0,"efg_pct":0,"tov_rate":0,"oreb_pct":0,"ft_rate":0,"opp_efg_pct":0,"opp_tov_rate":0,"opp_oreb_pct":0,"opp_3p_pct":0,"opp_ftr":0,"conf_tourney_winner":false,"conference":"","ranking":0,"kenpom_rank":0,"roster":[${rosterSchemaBlock}]}
 
 Rules:
 - ${promptRules}`;
@@ -231,13 +245,17 @@ Rules:
     parsed.ft_rate       = parsed.ft_rate       || 0.35;
     parsed.opp_efg_pct   = parsed.opp_efg_pct   || 0.50;
     parsed.opp_tov_rate  = parsed.opp_tov_rate  || 16;
-    parsed.opp_oreb_pct  = parsed.opp_oreb_pct  || 0.28;
+    parsed.opp_oreb_pct       = parsed.opp_oreb_pct       || 0.28;
+    parsed.opp_3p_pct         = parsed.opp_3p_pct         || 0.335;
+    parsed.opp_ftr            = parsed.opp_ftr            || 0.30;
+    parsed.conf_tourney_winner= parsed.conf_tourney_winner|| false;
     parsed.conference    = parsed.conference    || "Unknown";
     parsed.ranking       = parsed.ranking       || 0;
     parsed.kenpom_rank   = parsed.kenpom_rank   || 150;
     parsed.rest          = daysSinceLastGame;
     parsed.elo           = Math.round(teamElo);
     parsed.espn_id       = teamNumId;
+    parsed.margin_stddev = teamGames._marginStddev || 10;
     parsed.games         = teamGames;
     if (espnNetRank) parsed.kenpom_rank = espnNetRank;
 

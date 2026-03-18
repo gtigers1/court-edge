@@ -726,6 +726,64 @@ function NHLResults({results,awayTeam,homeTeam,awayAbbr,homeAbbr,awayOdds,homeOd
 }
 
 // â”€â”€â”€ NCAAM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Real schedule strength ratings from TeamRankings.com (current season)
+// Used instead of conference-tier proxy in confNorm — keyed by NCAAM_TEAMS name
+// Scale: positive = tough schedule, negative = weak, ~3 = D1 median
+const SOS_RATINGS={
+  // ACC
+  "Duke Blue Devils":15.2,"North Carolina Tar Heels":11.3,"Virginia Cavaliers":11.1,
+  "NC State Wolfpack":10.8,"Syracuse Orange":8.1,"Clemson Tigers":10.4,
+  "Pittsburgh Panthers":8.0,"Louisville Cardinals":12.8,"Notre Dame Fighting Irish":8.0,
+  "Wake Forest Demon Deacons":9.0,"Georgia Tech Yellow Jackets":3.9,"Florida State Seminoles":9.0,
+  "Miami Hurricanes":9.4,"Virginia Tech Hokies":8.5,"Stanford Cardinal":7.3,
+  "SMU Mustangs":10.1,"California Golden Bears":6.2,"Boston College Eagles":4.1,
+  // Big 12
+  "Kansas Jayhawks":14.3,"Baylor Bears":11.2,"Houston Cougars":14.5,
+  "Iowa State Cyclones":14.1,"Texas Tech Red Raiders":14.3,"Kansas State Wildcats":8.9,
+  "Arizona Wildcats":15.5,"Arizona State Sun Devils":10.2,"BYU Cougars":13.0,
+  "UCF Knights":9.7,"Cincinnati Bearcats":10.3,"Colorado Buffaloes":8.1,
+  "Utah Utes":7.7,"West Virginia Mountaineers":8.8,"Oklahoma State Cowboys":8.7,
+  "TCU Horned Frogs":10.3,
+  // Big East
+  "UConn Huskies":12.7,"Marquette Golden Eagles":8.8,"St. John's Red Storm":11.5,
+  "Creighton Bluejays":9.3,"Villanova Wildcats":9.8,"Xavier Musketeers":8.5,
+  "Providence Friars":9.0,"Seton Hall Pirates":8.4,"Butler Bulldogs":8.2,
+  "Georgetown Hoyas":8.4,"DePaul Blue Demons":6.5,
+  // Big Ten
+  "Michigan State Spartans":13.9,"Purdue Boilermakers":15.1,"Illinois Fighting Illini":14.4,
+  "Wisconsin Badgers":13.1,"Maryland Terrapins":9.1,"Ohio State Buckeyes":12.8,
+  "UCLA Bruins":12.0,"Indiana Hoosiers":11.4,"Michigan Wolverines":16.3,
+  "Penn State Nittany Lions":6.5,"Iowa Hawkeyes":11.9,"Rutgers Scarlet Knights":7.1,
+  "Northwestern Wildcats":10.5,"Minnesota Golden Gophers":8.7,"Nebraska Cornhuskers":12.5,
+  "Oregon Ducks":9.3,"USC Trojans":9.2,"Washington Huskies":10.3,
+  // SEC
+  "Kentucky Wildcats":14.2,"Tennessee Volunteers":14.2,"Auburn Tigers":13.5,
+  "Florida Gators":15.5,"Alabama Crimson Tide":14.7,"Arkansas Razorbacks":14.1,
+  "LSU Tigers":9.6,"Texas A&M Aggies":10.8,"Mississippi State Bulldogs":9.4,
+  "Ole Miss Rebels":10.9,"Missouri Tigers":10.6,"South Carolina Gamecocks":8.0,
+  "Vanderbilt Commodores":13.6,"Georgia Bulldogs":11.3,"Texas Longhorns":12.0,
+  "Oklahoma Sooners":11.4,
+  // WCC / MWC / Other
+  "Gonzaga Bulldogs":9.8,"San Diego State Aztecs":7.1,"New Mexico Lobos":5.4,
+  "Boise State Broncos":5.8,"Utah State Aggies":6.3,"Colorado State Rams":3.7,
+  "Memphis Tigers":4.1,"Wichita State Shockers":2.2,"UAB Blazers":0.3,
+  "Florida Atlantic Owls":1.1,"South Florida Bulls":4.1,
+  // A-10 / MVC
+  "Dayton Flyers":5.0,"VCU Rams":5.0,"Saint Louis Billikens":3.7,
+  "Davidson Wildcats":1.6,"Rhode Island Rams":1.2,"Loyola Chicago Ramblers":0.3,
+  "Richmond Spiders":0.0,"Saint Joseph's Hawks":0.8,"Northern Iowa Panthers":1.8,
+  // WCC mid-majors
+  "Santa Clara Broncos":6.3,"Saint Mary's Gaels":6.1,
+  // Small/mid-major conferences
+  "Akron Zips":-0.5,"Hofstra Pride":-0.3,"Miami (OH) Redhawks":-2.7,
+  "McNeese Cowboys":-0.1,"Troy Trojans":-1.8,"Pennsylvania Quakers":-0.5,
+  "Idaho Vandals":-2.8,"Siena Saints":-5.1,"Lehigh Mountain Hawks":-6.8,
+  "Cal Baptist Lancers":-1.2,"Furman Paladins":-3.8,"Hawaii Rainbow Warriors":-3.0,
+  "Kennesaw State Owls":-1.8,"Queens Royals":-3.7,"Wright State Raiders":-3.2,
+  "Tennessee State Tigers":-5.5,"North Dakota State Bison":-3.0,
+  "UMBC Retrievers":-5.0,"Howard Bison":-7.5,"Prairie View A&M Panthers":-7.5,
+  "LIU Sharks":-5.8,"High Point Panthers":-4.5,
+};
 const NCAAM_TEAMS=[
   {name:"Duke Blue Devils",id:"150",conf:"ACC"},{name:"North Carolina Tar Heels",id:"153",conf:"ACC"},
   {name:"Virginia Cavaliers",id:"258",conf:"ACC"},{name:"NC State Wolfpack",id:"152",conf:"ACC"},
@@ -1125,17 +1183,17 @@ function NCAAMPage(){
     setTimeout(()=>{
       // Schedule-strength normalization: removes raw PPG/OPP inflation from weak conferences.
       // A Summit League team scoring 80 PPG against weak defenses ≠ 80 PPG in the Big Ten.
-      // Formula: each tier point above/below the 6.5 "average conference" = ±4 pts to net rating,
-      // split 60% into PPG adjustment and 40% into OPP adjustment.
+      // When real SOS data is available (SOS_RATINGS), use it directly.
+      // Fallback: conference tier proxy (CONF_STRENGTH). Scale: (sos-3)*0.7 ≈ D1 median at 3.
       // Applied to PPG/OPP-based models (Efficiency, Pythagorean, Monte Carlo, LuckAdj).
       // Factor/talent/seed models use original data since those signals are not PPG-based.
-      const confNorm=(d,conf)=>{
-        const tier=CONF_STRENGTH[conf]||6.0;
-        const delta=(tier-6.5)*4.0;
+      const confNorm=(d,conf,teamName)=>{
+        const sos=SOS_RATINGS[teamName]??null;
+        const delta=sos!=null?(sos-3)*0.7:(CONF_STRENGTH[conf]||6.0-6.5)*4.0;
         return{...d,ppg:Math.max(55,d.ppg+delta*0.60),opp:Math.max(45,d.opp-delta*0.40)};
       };
-      const hNorm=confNorm({...homeData,conf:homeTeam?.conf},homeTeam?.conf);
-      const aNorm=confNorm({...awayData,conf:awayTeam?.conf},awayTeam?.conf);
+      const hNorm=confNorm({...homeData,conf:homeTeam?.conf},homeTeam?.conf,homeTeam?.name);
+      const aNorm=confNorm({...awayData,conf:awayTeam?.conf},awayTeam?.conf,awayTeam?.name);
       // Models using schedule-strength-normalized PPG/OPP
       const eff=ncaamMdlEfficiency(hNorm,aNorm,true);
       const pyth=ncaamMdlPythagorean(hNorm,aNorm,true);
@@ -1760,13 +1818,13 @@ function NCAATreePage(){
   const [errors,setErrors]=useState({});
   const setSel=(region,seed,team)=>{setSels(prev=>({...prev,[region]:{...prev[region],[seed]:team}}));setBrackets(prev=>{const n={...prev};delete n[region];return n;});};
   const R64_PAIRS=[[1,16],[8,9],[5,12],[4,13],[6,11],[3,14],[7,10],[2,15]];
-  const confNormFn=(d,conf)=>{const tier=CONF_STRENGTH[conf]||6.0;const delta=(tier-6.5)*4.0;const ppg=d.ppg||70;const opp=d.opp||68;return{...d,ppg:Math.max(55,ppg+delta*0.60),opp:Math.max(45,opp-delta*0.40),tempo:d.tempo||68};};
+  const confNormFn=(d,conf,teamName)=>{const sos=SOS_RATINGS[teamName]??null;const delta=sos!=null?(sos-3)*0.7:(CONF_STRENGTH[conf]||6.0-6.5)*4.0;const ppg=d.ppg||70;const opp=d.opp||68;return{...d,ppg:Math.max(55,ppg+delta*0.60),opp:Math.max(45,opp-delta*0.40),tempo:d.tempo||68};};
   const safeData=(d)=>({...d,ppg:d.ppg||70,opp:d.opp||68,tempo:d.tempo||68,efg_pct:d.efg_pct||0.50,opp_efg_pct:d.opp_efg_pct||0.50,tov_rate:d.tov_rate||18,opp_tov_rate:d.opp_tov_rate||18,oreb_pct:d.oreb_pct||0.28,opp_oreb_pct:d.opp_oreb_pct||0.28,ft_rate:d.ft_rate||0.30,opp_ft_rate:d.opp_ft_rate||0.30,opp_ftr:d.opp_ftr||d.opp_ft_rate||0.30,opp_3p_pct:d.opp_3p_pct||0.335,conf_tourney_winner:d.conf_tourney_winner||false,margin_stddev:d.margin_stddev||10,kenpom_rank:d.kenpom_rank||150,roster:d.roster||[]});
   const runGame=(t1,t2,round)=>{
     if(t1.data&&t2.data){
       const sd1=safeData(t1.data),sd2=safeData(t2.data);
-      const hNorm=confNormFn({...sd1,conf:t1.teamObj.conf},t1.teamObj.conf);
-      const aNorm=confNormFn({...sd2,conf:t2.teamObj.conf},t2.teamObj.conf);
+      const hNorm=confNormFn({...sd1,conf:t1.teamObj.conf},t1.teamObj.conf,t1.teamObj.name);
+      const aNorm=confNormFn({...sd2,conf:t2.teamObj.conf},t2.teamObj.conf,t2.teamObj.name);
       const eff=ncaamMdlEfficiency(hNorm,aNorm,true);const pyth=ncaamMdlPythagorean(hNorm,aNorm,true);
       const ff=ncaamMdlFourFactors(sd1,sd2,true);const tal=ncaamMdlTalent(sd1,sd2,true);
       const mc=ncaamMdlMonteCarlo(hNorm,aNorm,3000,true);

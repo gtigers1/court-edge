@@ -1741,18 +1741,21 @@ function NCAATreePage(){
   const [errors,setErrors]=useState({});
   const setSel=(region,seed,team)=>{setSels(prev=>({...prev,[region]:{...prev[region],[seed]:team}}));setBrackets(prev=>{const n={...prev};delete n[region];return n;});};
   const R64_PAIRS=[[1,16],[8,9],[5,12],[4,13],[6,11],[3,14],[7,10],[2,15]];
-  const confNormFn=(d,conf)=>{const tier=CONF_STRENGTH[conf]||6.0;const delta=(tier-6.5)*4.0;return{...d,ppg:Math.max(55,d.ppg+delta*0.60),opp:Math.max(45,d.opp-delta*0.40)};};
+  const confNormFn=(d,conf)=>{const tier=CONF_STRENGTH[conf]||6.0;const delta=(tier-6.5)*4.0;const ppg=d.ppg||70;const opp=d.opp||68;return{...d,ppg:Math.max(55,ppg+delta*0.60),opp:Math.max(45,opp-delta*0.40),tempo:d.tempo||68};};
+  const safeData=(d)=>({...d,ppg:d.ppg||70,opp:d.opp||68,tempo:d.tempo||68,efg_pct:d.efg_pct||0.50,opp_efg_pct:d.opp_efg_pct||0.50,tov_rate:d.tov_rate||18,opp_tov_rate:d.opp_tov_rate||18,oreb_pct:d.oreb_pct||0.28,opp_oreb_pct:d.opp_oreb_pct||0.28,ft_rate:d.ft_rate||0.30,opp_ft_rate:d.opp_ft_rate||0.30,kenpom_rank:d.kenpom_rank||150,roster:d.roster||[]});
   const runGame=(t1,t2,round)=>{
     if(t1.data&&t2.data){
-      const hNorm=confNormFn({...t1.data,conf:t1.teamObj.conf},t1.teamObj.conf);
-      const aNorm=confNormFn({...t2.data,conf:t2.teamObj.conf},t2.teamObj.conf);
+      const sd1=safeData(t1.data),sd2=safeData(t2.data);
+      const hNorm=confNormFn({...sd1,conf:t1.teamObj.conf},t1.teamObj.conf);
+      const aNorm=confNormFn({...sd2,conf:t2.teamObj.conf},t2.teamObj.conf);
       const eff=ncaamMdlEfficiency(hNorm,aNorm,true);const pyth=ncaamMdlPythagorean(hNorm,aNorm,true);
-      const ff=ncaamMdlFourFactors(t1.data,t2.data,true);const tal=ncaamMdlTalent(t1.data,t2.data,true);
+      const ff=ncaamMdlFourFactors(sd1,sd2,true);const tal=ncaamMdlTalent(sd1,sd2,true);
       const mc=ncaamMdlMonteCarlo(hNorm,aNorm,3000,true);
-      const cs=ncaamMdlConferenceStrength({...t1.data,conf:t1.teamObj.conf},{...t2.data,conf:t2.teamObj.conf});
-      const sa=ncaamMdlSeedAnchor(t1.data,t2.data,t2.seed,t1.seed);const la=ncaamMdlLuckAdjusted(hNorm,aNorm);
-      const allPs=[eff,pyth,ff,tal,mc,cs,sa,la].filter(Boolean).map(m=>m.homeProb);
-      const cons=ncaamConsensus(allPs,null,round);return{p:cons.prob,dataMode:true};
+      const cs=ncaamMdlConferenceStrength({...sd1,conf:t1.teamObj.conf},{...sd2,conf:t2.teamObj.conf});
+      const sa=ncaamMdlSeedAnchor(sd1,sd2,t2.seed,t1.seed);const la=ncaamMdlLuckAdjusted(hNorm,aNorm);
+      const allPs=[eff,pyth,ff,tal,mc,cs,sa,la].filter(Boolean).map(m=>m.homeProb).filter(v=>!isNaN(v)&&isFinite(v));
+      if(!allPs.length)return{p:treeProb(t1.seed,t2.seed),dataMode:false};
+      const cons=ncaamConsensus(allPs,null,round);return{p:cons,dataMode:true};
     }
     const lo=Math.min(t1.seed,t2.seed),hi=Math.max(t1.seed,t2.seed);
     const base=TREE_HIST[lo+"-"+hi]!=null?TREE_HIST[lo+"-"+hi]:Math.min(0.97,Math.max(0.40,logistic((hi-lo)*0.20)));

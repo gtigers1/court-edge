@@ -1717,8 +1717,9 @@ function treeProb(s1,s2){
 function NCAAGameCard({game}){
   const ac=C.amber;
   const t1w=game.w.seed===game.t1.seed&&game.w.name===game.t1.name;
-  const p1=t1w?game.p:1-game.p;
-  const p2=t1w?1-game.p:game.p;
+  // Always show each team's own probability: game.p is t1's win prob, 1-game.p is t2's
+  const p1=game.p;
+  const p2=1-game.p;
   const upset=game.w.seed>Math.min(game.t1.seed,game.t2.seed)&&game.t1.seed!==game.t2.seed;
   const Row=({team,prob,win})=>(
     <div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 6px",borderRadius:4,

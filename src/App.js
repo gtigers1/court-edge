@@ -2074,6 +2074,10 @@ function NCAAOraclePage(){
       });
       // survival[id] = [r64_won, r32_won, s16_won, e8_won, f4_won, champ_won]
       const sv={};all.forEach(t=>{sv[t.id]=[0,0,0,0,0,0];});
+      // slotWins[slotKey][teamId] = # times that team won that bracket slot
+      // slotKey format: "${region}-${roundIdx}-${gameIdx}" | "F4-${i}" | "CHAMP"
+      const sw={};
+      const track=(key,t)=>{if(!sw[key])sw[key]={};sw[key][t.id]=(sw[key][t.id]||0)+1;};
       const gt=(r,s)=>{const t=sels[r][s];return tmap[t?t.id:`${r}-${s}`];};
       const wg=(a,b)=>Math.random()<logistic(a.rating-b.rating)?a:b;
       // Run 50,000 full-bracket simulations
@@ -2082,22 +2086,23 @@ function NCAAOraclePage(){
         for(let ri=0;ri<4;ri++){
           const rg=REGIONS[ri];
           // Round of 64 → 8 survivors
-          const q=R64P.map(([s1,s2])=>{const w=wg(gt(rg,s1),gt(rg,s2));sv[w.id][0]++;return w;});
+          const q=R64P.map(([s1,s2],gi)=>{const w=wg(gt(rg,s1),gt(rg,s2));sv[w.id][0]++;track(`${rg}-0-${gi}`,w);return w;});
           // Round of 32 → 4 survivors
-          const s=[[0,1],[2,3],[4,5],[6,7]].map(([a,b])=>{const w=wg(q[a],q[b]);sv[w.id][1]++;return w;});
+          const s=[[0,1],[2,3],[4,5],[6,7]].map(([a,b],gi)=>{const w=wg(q[a],q[b]);sv[w.id][1]++;track(`${rg}-1-${gi}`,w);return w;});
           // Sweet 16 → 2 survivors
-          const e=[[0,1],[2,3]].map(([a,b])=>{const w=wg(s[a],s[b]);sv[w.id][2]++;return w;});
+          const e=[[0,1],[2,3]].map(([a,b],gi)=>{const w=wg(s[a],s[b]);sv[w.id][2]++;track(`${rg}-2-${gi}`,w);return w;});
           // Elite 8 → region champ
-          const c=wg(e[0],e[1]);sv[c.id][3]++;rc.push(c);
+          const c=wg(e[0],e[1]);sv[c.id][3]++;track(`${rg}-3-0`,c);rc.push(c);
         }
         // Final Four: East (0) vs South (2), West (1) vs Midwest (3)
-        const fw=[wg(rc[0],rc[2]),wg(rc[1],rc[3])];fw.forEach(t=>sv[t.id][4]++);
+        const fw=[wg(rc[0],rc[2]),wg(rc[1],rc[3])];
+        fw.forEach((t,fi)=>{sv[t.id][4]++;track(`F4-${fi}`,t);});
         // Championship
-        sv[wg(fw[0],fw[1]).id][5]++;
+        const ch=wg(fw[0],fw[1]);sv[ch.id][5]++;track('CHAMP',ch);
       }
       const results=all.map(t=>({...t,probs:sv[t.id].map(c=>c/N),base:SEED_CHAMP_BASE[t.seed]??0}))
         .sort((a,b)=>b.probs[5]-a.probs[5]);
-      setSimResults({results,N});
+      setSimResults({results,N,slotWins:sw,teamById:tmap});
       setSimRunning(false);
     },20);
   };
@@ -2202,21 +2207,46 @@ function NCAAOraclePage(){
       </div>
 
 
-      {/* ── Bracket view — deterministic BT predictions, always available ── */}
+      {/* ── Bracket view — sim consensus when available, BT fallback ── */}
       {viewMode==="bracket"&&(()=>{
-        const paths={};REGIONS.forEach(r=>{paths[r]=computeBracketPath(r);});
-        // F4: East vs South, West vs Midwest
-        const mkF4=(r1,r2)=>{const t1=paths[r1].champ,t2=paths[r2].champ;const p=logistic(t1.rating-t2.rating);return{t1,t2,p,w:p>=0.5?t1:t2};};
-        const f4=[mkF4("East","South"),mkF4("West","Midwest")];
-        const champG={t1:f4[0].w,t2:f4[1].w};const cp=logistic(champG.t1.rating-champG.t2.rating);
-        const champ={...champG,p:cp,w:cp>=0.5?champG.t1:champG.t2};
-        const path=paths[activeRegion];
+        const useSim=!!(simResults?.slotWins);
+        // Build a game from simulation slot data (post-simulation)
+        const simGame=(feedKey1,feedKey2,winKey,fixT1,fixT2)=>{
+          const tb=simResults.teamById;const sw=simResults.slotWins;
+          const topOf=(key)=>{const m=sw[key];if(!m)return null;const [id]=Object.entries(m).sort((a,b)=>b[1]-a[1])[0];return tb[id];};
+          const t1=fixT1||topOf(feedKey1);const t2=fixT2||topOf(feedKey2);
+          if(!t1||!t2)return null;
+          const wKey=sw[winKey]||{};
+          const t1w=wKey[t1.id]||0,t2w=wKey[t2.id]||0,tot=t1w+t2w;
+          // p = fraction of times t1 won this slot vs t2 winning it
+          const p=tot>0?t1w/tot:logistic(t1.rating-t2.rating);
+          return{t1,t2,p,w:p>=0.5?t1:t2};
+        };
+        // Build bracket: simulation consensus if run, otherwise deterministic BT
+        let path,f4,champ;
+        if(useSim){
+          const mkT=(region,seed)=>{const t=sels[region][seed];const name=t?t.name:`${region} ${seed} Seed`;const conf=t?t.conf:"";return{name,conf,seed,rating:compRating(name,conf,seed),isPholder:!t,id:t?t.id:`${region}-${seed}`};};
+          const r64=[[1,16],[8,9],[5,12],[4,13],[6,11],[3,14],[7,10],[2,15]].map(([s1,s2],gi)=>simGame(null,null,`${activeRegion}-0-${gi}`,mkT(activeRegion,s1),mkT(activeRegion,s2)));
+          const r32=[0,1,2,3].map(gi=>simGame(`${activeRegion}-0-${gi*2}`,`${activeRegion}-0-${gi*2+1}`,`${activeRegion}-1-${gi}`));
+          const s16=[0,1].map(gi=>simGame(`${activeRegion}-1-${gi*2}`,`${activeRegion}-1-${gi*2+1}`,`${activeRegion}-2-${gi}`));
+          const e8=simGame(`${activeRegion}-2-0`,`${activeRegion}-2-1`,`${activeRegion}-3-0`);
+          path={r64,r32,s16,e8,champ:e8?.w};
+          f4=[simGame('East-3-0','South-3-0','F4-0'),simGame('West-3-0','Midwest-3-0','F4-1')];
+          champ=simGame('F4-0','F4-1','CHAMP');
+        } else {
+          const paths={};REGIONS.forEach(r=>{paths[r]=computeBracketPath(r);});
+          const mkF4=(r1,r2)=>{const t1=paths[r1].champ,t2=paths[r2].champ;const p=logistic(t1.rating-t2.rating);return{t1,t2,p,w:p>=0.5?t1:t2};};
+          f4=[mkF4("East","South"),mkF4("West","Midwest")];
+          const champG={t1:f4[0].w,t2:f4[1].w};const cp=logistic(champG.t1.rating-champG.t2.rating);
+          champ={...champG,p:cp,w:cp>=0.5?champG.t1:champG.t2};
+          path=paths[activeRegion];
+        }
         const BH=440;
         const RoundCol=({games,label})=>(
           <div style={{display:"flex",flexDirection:"column",minWidth:130,flex:1}}>
             <div style={{textAlign:"center",fontSize:8,color:C.muted,letterSpacing:1.5,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",fontWeight:700,padding:"4px 0",borderBottom:"1px solid "+C.border+"44",marginBottom:4}}>{label}</div>
             <div style={{display:"flex",flexDirection:"column",justifyContent:"space-evenly",height:BH,gap:4}}>
-              {games.map((g,i)=><BracketCard key={i} game={g}/>)}
+              {(games||[]).filter(Boolean).map((g,i)=><BracketCard key={i} game={g}/>)}
             </div>
           </div>
         );
@@ -2224,13 +2254,13 @@ function NCAAOraclePage(){
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
               <SectionHeader label={activeRegion+" Region — Round-by-Round Predictions"} accent={ac}
-                right={<span style={{fontSize:10,color:C.muted}}>Bradley-Terry model · most likely winner of each game · highlighted team advances</span>}/>
+                right={<span style={{fontSize:10,color:C.muted}}>{useSim?`Sim consensus · ${simResults.N.toLocaleString()} runs · highlighted = most frequent winner`:"BT model · run simulation for consensus predictions"}</span>}/>
               <div style={{overflowX:"auto"}}>
                 <div style={{display:"flex",gap:6,padding:12,minWidth:560}}>
                   <RoundCol games={path.r64} label="Round of 64"/>
                   <RoundCol games={path.r32} label="Round of 32"/>
                   <RoundCol games={path.s16} label="Sweet 16"/>
-                  <RoundCol games={[path.e8]} label="Elite 8"/>
+                  <RoundCol games={[path.e8].filter(Boolean)} label="Elite 8"/>
                 </div>
               </div>
             </div>
@@ -2240,15 +2270,15 @@ function NCAAOraclePage(){
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,padding:12}}>
                 <div>
                   <div style={{fontSize:9,color:C.muted,letterSpacing:1.5,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",fontWeight:700,marginBottom:6}}>Semifinal 1 — East vs South</div>
-                  <BracketCard game={f4[0]}/>
+                  <BracketCard game={f4[0]||null}/>
                 </div>
                 <div>
                   <div style={{fontSize:9,color:C.muted,letterSpacing:1.5,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",fontWeight:700,marginBottom:6}}>Semifinal 2 — West vs Midwest</div>
-                  <BracketCard game={f4[1]}/>
+                  <BracketCard game={f4[1]||null}/>
                 </div>
                 <div>
                   <div style={{fontSize:9,color:C.copper,letterSpacing:1.5,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",fontWeight:700,marginBottom:6}}>Championship</div>
-                  <BracketCard game={champ}/>
+                  <BracketCard game={champ||null}/>
                 </div>
               </div>
             </div>

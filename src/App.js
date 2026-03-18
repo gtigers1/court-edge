@@ -2042,7 +2042,7 @@ function NCAAOraclePage(){
   const [sels,setSels]=useState(()=>{const t={};REGIONS.forEach(r=>{t[r]={};for(let s=1;s<=16;s++)t[r][s]=null;});return t;});
   const [simResults,setSimResults]=useState(null);
   const [simRunning,setSimRunning]=useState(false);
-  const [viewMode,setViewMode]=useState("champion");
+  const [viewMode,setViewMode]=useState("bracket");
 
   // Bradley-Terry rating: seed anchor + SOS adjustment + conference tier
   const compRating=(name,conf,seed)=>{
@@ -2110,6 +2110,42 @@ function NCAAOraclePage(){
   // Heat-map color: normalizes each round by its realistic maximum
   const pColor=(p,ri)=>{const v=p/ROUND_NORMS[ri];if(v>=0.80)return"#22c55e";if(v>=0.55)return"#84cc16";if(v>=0.35)return ac;if(v>=0.15)return"#f97316";if(v>=0.05)return"#ef4444";return C.dim;};
 
+  // Deterministic bracket path using BT ratings — no simulation needed, instant
+  const computeBracketPath=(region)=>{
+    const R64P=[[1,16],[8,9],[5,12],[4,13],[6,11],[3,14],[7,10],[2,15]];
+    const mkT=(seed)=>{const t=sels[region][seed];const name=t?t.name:`${region} ${seed} Seed`;const conf=t?t.conf:"";return{name,conf,seed,rating:compRating(name,conf,seed),isPholder:!t};};
+    const game=(t1,t2)=>{const p=logistic(t1.rating-t2.rating);return{t1,t2,p,w:p>=0.5?t1:t2};};
+    const r64=R64P.map(([s1,s2])=>game(mkT(s1),mkT(s2)));
+    const r32=[[0,1],[2,3],[4,5],[6,7]].map(([i,j])=>game(r64[i].w,r64[j].w));
+    const s16=[[0,1],[2,3]].map(([i,j])=>game(r32[i].w,r32[j].w));
+    const e8=game(s16[0].w,s16[1].w);
+    return{r64,r32,s16,e8,champ:e8.w};
+  };
+
+  // Bracket game card (BT model — analogous to NCAAGameCard but rating-based)
+  const BracketCard=({game})=>{
+    if(!game)return null;
+    const t1w=game.w.name===game.t1.name&&game.w.seed===game.t1.seed;
+    const upset=game.w.seed>Math.min(game.t1.seed,game.t2.seed)&&game.t1.seed!==game.t2.seed;
+    const Row=({team,prob,win})=>(
+      <div style={{display:"flex",alignItems:"center",gap:4,padding:"3px 6px",borderRadius:3,background:win?ac+"18":"transparent",border:win?"1px solid "+ac+"33":"1px solid transparent"}}>
+        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:9,color:ac,minWidth:14,textAlign:"center",background:ac+"22",borderRadius:2,padding:"0 2px"}}>{team.seed}</span>
+        <span style={{fontSize:10,color:win?C.white:C.muted,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:win?700:400}}>{team.name}</span>
+        <span style={{fontFamily:"'Barlow Condensed'",fontSize:9,fontWeight:700,color:win?ac:C.dim,minWidth:26,textAlign:"right"}}>{(prob*100).toFixed(0)}%</span>
+      </div>
+    );
+    return(
+      <div style={{background:C.black,border:"1px solid "+(upset?ac+"66":C.border),borderRadius:6,overflow:"hidden",width:"100%"}}>
+        <div style={{padding:"3px 4px"}}>
+          <Row team={game.t1} prob={game.p} win={t1w}/>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"1px 0"}}><span style={{fontSize:7,color:C.dim}}>vs</span></div>
+          <Row team={game.t2} prob={1-game.p} win={!t1w}/>
+        </div>
+        {upset&&<div style={{fontSize:7,color:"#f87171",textAlign:"center",padding:"2px",background:"#f8717111",letterSpacing:1,fontFamily:"'Barlow Condensed'",fontWeight:700}}>UPSET PICK</div>}
+      </div>
+    );
+  };
+
   // Team seed-assignment grid (reused in multiple views)
   const SetupGrid=({region})=>(
     <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
@@ -2150,27 +2186,80 @@ function NCAAOraclePage(){
             </button>
           </div>
         </div>
-        {/* View mode tabs (visible after first simulation) */}
-        {simResults&&(
-          <div style={{display:"flex",gap:4,padding:"6px 12px",background:C.black,alignItems:"center",flexWrap:"wrap"}}>
-            {[["champion","CHAMPION ODDS"],["matrix","SURVIVAL MATRIX"],["value","VALUE REPORT"]].map(([id,label])=>(
-              <button key={id} onClick={()=>setViewMode(id)} style={{padding:"4px 12px",borderRadius:4,border:"1px solid "+(viewMode===id?ac:C.border),cursor:"pointer",background:viewMode===id?ac+"22":"transparent",color:viewMode===id?ac:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:11,letterSpacing:.5}}>
-                {label}
+        {/* View mode tabs — BRACKET always available; others require simulation */}
+        <div style={{display:"flex",gap:4,padding:"6px 12px",background:C.black,alignItems:"center",flexWrap:"wrap"}}>
+          {[["bracket","BRACKET"],["champion","CHAMPION ODDS"],["matrix","SURVIVAL MATRIX"],["value","VALUE REPORT"]].map(([id,label])=>{
+            const needsSim=id!=="bracket";
+            const disabled=needsSim&&!simResults;
+            return(
+              <button key={id} onClick={()=>!disabled&&setViewMode(id)} style={{padding:"4px 12px",borderRadius:4,border:"1px solid "+(viewMode===id?ac:C.border),cursor:disabled?"not-allowed":"pointer",background:viewMode===id?ac+"22":"transparent",color:viewMode===id?ac:disabled?C.dim:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:11,letterSpacing:.5,opacity:disabled?0.45:1}}>
+                {label}{disabled&&<span style={{fontSize:8,color:C.dim}}> (sim first)</span>}
               </button>
-            ))}
-            <span style={{marginLeft:"auto",fontSize:9,color:C.dim,fontFamily:"'Barlow Condensed'"}}>{simResults.N.toLocaleString()} simulations</span>
-          </div>
-        )}
+            );
+          })}
+          {simResults&&<span style={{marginLeft:"auto",fontSize:9,color:C.dim,fontFamily:"'Barlow Condensed'"}}>{simResults.N.toLocaleString()} sims</span>}
+        </div>
       </div>
 
-      {/* ── Setup mode (no results yet) ── */}
-      {!simResults&&(
-        <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-          <SectionHeader label={activeRegion+" Region — Assign Teams to Seeds"} accent={ac}
-            right={<span style={{fontSize:10,color:C.muted}}>Fill all 4 regions then click RUN 50K SIMS</span>}/>
-          <div style={{padding:12}}><SetupGrid region={activeRegion}/></div>
-        </div>
-      )}
+
+      {/* ── Bracket view — deterministic BT predictions, always available ── */}
+      {viewMode==="bracket"&&(()=>{
+        const paths={};REGIONS.forEach(r=>{paths[r]=computeBracketPath(r);});
+        // F4: East vs South, West vs Midwest
+        const mkF4=(r1,r2)=>{const t1=paths[r1].champ,t2=paths[r2].champ;const p=logistic(t1.rating-t2.rating);return{t1,t2,p,w:p>=0.5?t1:t2};};
+        const f4=[mkF4("East","South"),mkF4("West","Midwest")];
+        const champG={t1:f4[0].w,t2:f4[1].w};const cp=logistic(champG.t1.rating-champG.t2.rating);
+        const champ={...champG,p:cp,w:cp>=0.5?champG.t1:champG.t2};
+        const path=paths[activeRegion];
+        const BH=440;
+        const RoundCol=({games,label})=>(
+          <div style={{display:"flex",flexDirection:"column",minWidth:130,flex:1}}>
+            <div style={{textAlign:"center",fontSize:8,color:C.muted,letterSpacing:1.5,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",fontWeight:700,padding:"4px 0",borderBottom:"1px solid "+C.border+"44",marginBottom:4}}>{label}</div>
+            <div style={{display:"flex",flexDirection:"column",justifyContent:"space-evenly",height:BH,gap:4}}>
+              {games.map((g,i)=><BracketCard key={i} game={g}/>)}
+            </div>
+          </div>
+        );
+        return(
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+              <SectionHeader label={activeRegion+" Region — Round-by-Round Predictions"} accent={ac}
+                right={<span style={{fontSize:10,color:C.muted}}>Bradley-Terry model · most likely winner of each game · highlighted team advances</span>}/>
+              <div style={{overflowX:"auto"}}>
+                <div style={{display:"flex",gap:6,padding:12,minWidth:560}}>
+                  <RoundCol games={path.r64} label="Round of 64"/>
+                  <RoundCol games={path.r32} label="Round of 32"/>
+                  <RoundCol games={path.s16} label="Sweet 16"/>
+                  <RoundCol games={[path.e8]} label="Elite 8"/>
+                </div>
+              </div>
+            </div>
+            <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+              <SectionHeader label="Final Four & Championship" accent={ac}
+                right={<span style={{fontSize:10,color:C.muted}}>East vs South · West vs Midwest</span>}/>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,padding:12}}>
+                <div>
+                  <div style={{fontSize:9,color:C.muted,letterSpacing:1.5,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",fontWeight:700,marginBottom:6}}>Semifinal 1 — East vs South</div>
+                  <BracketCard game={f4[0]}/>
+                </div>
+                <div>
+                  <div style={{fontSize:9,color:C.muted,letterSpacing:1.5,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",fontWeight:700,marginBottom:6}}>Semifinal 2 — West vs Midwest</div>
+                  <BracketCard game={f4[1]}/>
+                </div>
+                <div>
+                  <div style={{fontSize:9,color:C.copper,letterSpacing:1.5,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",fontWeight:700,marginBottom:6}}>Championship</div>
+                  <BracketCard game={champ}/>
+                </div>
+              </div>
+            </div>
+            <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+              <SectionHeader label={activeRegion+" Region — Edit Seeds"} accent={ac}
+                right={<span style={{fontSize:10,color:C.muted}}>Predictions update instantly as you assign teams</span>}/>
+              <div style={{padding:12}}><SetupGrid region={activeRegion}/></div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Champion Odds view ── */}
       {simResults&&viewMode==="champion"&&(

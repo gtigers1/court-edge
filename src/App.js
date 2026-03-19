@@ -2225,59 +2225,60 @@ function NCAAOraclePage(){
     const favNet=(fav.data?.kenpom_rank)||(fav.teamObj?null:null);
     if(dogNet){
       const under=dogExpNet-dogNet;
-      if(under>60){boost+=0.28;flags.push("📊 Severely underseeded (NET)");}
-      else if(under>40){boost+=0.20;flags.push("📊 Underseeded by NET rank");}
-      else if(under>20){boost+=0.11;flags.push("📊 Better metrics than seed");}
-      else if(under>8){boost+=0.05;}
+      if(under>60){boost+=0.13;flags.push("📊 Severely underseeded (NET)");}
+      else if(under>40){boost+=0.09;flags.push("📊 Underseeded by NET rank");}
+      else if(under>20){boost+=0.05;flags.push("📊 Better metrics than seed");}
+      else if(under>8){boost+=0.02;}
     }
     // 2. Over-seeded favorite — weak team hiding behind big brand (Kentucky 2024)
     if(favNet){
       const over=favNet-favExpNet;
-      if(over>60){boost+=0.22;flags.push("⚠️ Favorite over-seeded by NET");}
-      else if(over>35){boost+=0.14;flags.push("⚠️ Favorite metrics below seed");}
-      else if(over>15){boost+=0.07;flags.push("⚠️ Fav slightly inflated");}
+      if(over>60){boost+=0.10;flags.push("⚠️ Favorite over-seeded by NET");}
+      else if(over>35){boost+=0.06;flags.push("⚠️ Favorite metrics below seed");}
+      else if(over>15){boost+=0.03;flags.push("⚠️ Fav slightly inflated");}
     }
     // 3. Underdog elite defense for their seed (Loyola 2018, JMU 2024, Saint Peter's 2022)
     if(dog.data?.opp&&dog.seed>=9){
       const bench={9:70,10:69,11:68,12:67,13:70,14:72,15:74,16:76}[dog.seed]||71;
       const elite=bench-dog.data.opp;
-      if(elite>8){boost+=0.20;flags.push("🛡 Elite D for seed (top-50 nationally)");}
-      else if(elite>5){boost+=0.12;flags.push("🛡 Strong defense vs seed");}
-      else if(elite>2){boost+=0.05;}
+      if(elite>8){boost+=0.09;flags.push("🛡 Elite D for seed (top-50 nationally)");}
+      else if(elite>5){boost+=0.05;flags.push("🛡 Strong defense vs seed");}
+      else if(elite>2){boost+=0.02;}
     }
     // 4. Vulnerable favorite defense (Ohio State 2021 AdjD #79, Arizona 2018 passive D)
     if(fav.data?.opp&&fav.seed<=7){
       const bench={1:60,2:62,3:63,4:65,5:67,6:68,7:69}[fav.seed]||66;
       const weak=fav.data.opp-bench;
-      if(weak>7){boost+=0.16;flags.push("🚨 Favorite has weak defense");}
-      else if(weak>4){boost+=0.09;flags.push("🚨 Favorite porous perimeter D");}
-      else if(weak>1.5){boost+=0.04;}
+      if(weak>7){boost+=0.07;flags.push("🚨 Favorite has weak defense");}
+      else if(weak>4){boost+=0.04;flags.push("🚨 Favorite porous perimeter D");}
+      else if(weak>1.5){boost+=0.02;}
     }
     // 5. Slow tempo — reduces possessions, increases single-game variance (Princeton, Yale)
     if(dog.data?.tempo){
-      if(dog.data.tempo<63){boost+=0.14;flags.push("🐢 Very slow pace (high variance)");}
-      else if(dog.data.tempo<66){boost+=0.08;flags.push("🐢 Deliberate pace");}
-      else if(dog.data.tempo<68){boost+=0.03;}
+      if(dog.data.tempo<63){boost+=0.06;flags.push("🐢 Very slow pace (high variance)");}
+      else if(dog.data.tempo<66){boost+=0.04;flags.push("🐢 Deliberate pace");}
+      else if(dog.data.tempo<68){boost+=0.01;}
     }
     // 6. Conference tournament momentum (all major Cinderellas entered on winning streaks)
-    if(dog.data?.conf_tourney_winner){boost+=0.12;flags.push("🏆 Conf. tourney winner — peak form");}
+    if(dog.data?.conf_tourney_winner){boost+=0.05;flags.push("🏆 Conf. tourney winner — peak form");}
     // 7. Strong mid-major underseeding patterns from 2015-2024 data
     const conf=dog.teamObj?.conf||"";
-    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.12;flags.push("💪 MVC — top mid-major, underseeded");}
-    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.08;flags.push("💪 A-10 underseeded by committee");}
-    else if(conf.includes("Ivy")){boost+=0.11;flags.push("🎓 Ivy — veteran roster, no early exits");}
-    else if(conf.includes("West Coast")||conf.includes("WCC")){boost+=0.07;flags.push("💪 WCC mid-major");}
-    else if(conf.includes("MAC")||conf.includes("CAA")||conf.includes("C-USA")||conf.includes("Conference USA")){boost+=0.07;flags.push("💪 Strong mid-major");}
-    else if(conf.includes("American")||conf.includes("Mountain West")){boost+=0.05;}
+    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.06;flags.push("💪 MVC — top mid-major, underseeded");}
+    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.04;flags.push("💪 A-10 underseeded by committee");}
+    else if(conf.includes("Ivy")){boost+=0.05;flags.push("🎓 Ivy — veteran roster, no early exits");}
+    else if(conf.includes("West Coast")||conf.includes("WCC")){boost+=0.03;flags.push("💪 WCC mid-major");}
+    else if(conf.includes("MAC")||conf.includes("CAA")||conf.includes("C-USA")||conf.includes("Conference USA")){boost+=0.03;flags.push("💪 Strong mid-major");}
+    else if(conf.includes("American")||conf.includes("Mountain West")){boost+=0.02;}
     // 8. High-scoring offense vs seed (Oral Roberts 2021: elite offense despite weak D)
     if(dog.data?.ppg&&dog.seed>=11){
       const offBench={11:73,12:72,13:70,14:68,15:66,16:64}[dog.seed]||70;
       const offElite=dog.data.ppg-offBench;
-      if(offElite>7){boost+=0.10;flags.push("🔥 Elite offense for seed");}
-      else if(offElite>4){boost+=0.05;flags.push("🔥 Strong offense vs seed");}
+      if(offElite>7){boost+=0.05;flags.push("🔥 Elite offense for seed");}
+      else if(offElite>4){boost+=0.02;flags.push("🔥 Strong offense vs seed");}
     }
-    // Cap total boost by seed gap (extreme mismatches shouldn't flip completely)
-    const maxBoost=seedGap>=10?0.55:seedGap>=7?0.70:seedGap>=5?0.85:seedGap>=3?0.95:1.05;
+    // Cap: large seed gaps should almost never flip. Boost nudges probability; rarely decides winner.
+    // A 12-seed starting at 35% + max boost → ~44% (⚡ watch). Only genuinely close by metrics → upset.
+    const maxBoost=seedGap>=10?0.14:seedGap>=7?0.20:seedGap>=5?0.30:seedGap>=3?0.42:0.52;
     return{boost:Math.min(boost,maxBoost),flags};
   };
 
@@ -2304,73 +2305,73 @@ function NCAAOraclePage(){
     // 1. Underseeded underdog (still #1 predictor — metrics > seed implies committee whiffed)
     if(dogNet){
       const under=dogExpNet-dogNet;
-      if(under>70){boost+=0.24;flags.push("📊 Severely underseeded — elite metrics for seed");}
-      else if(under>45){boost+=0.17;flags.push("📊 Underseeded by NET rank");}
-      else if(under>25){boost+=0.09;flags.push("📊 Better analytics than seed");}
-      else if(under>10){boost+=0.04;}
+      if(under>70){boost+=0.12;flags.push("📊 Severely underseeded — elite metrics for seed");}
+      else if(under>45){boost+=0.08;flags.push("📊 Underseeded by NET rank");}
+      else if(under>25){boost+=0.04;flags.push("📊 Better analytics than seed");}
+      else if(under>10){boost+=0.02;}
     }
     // 2. Over-seeded favorite (KenPom reveals committee bias toward brands)
     if(favNet){
       const over=favNet-favExpNet;
-      if(over>70){boost+=0.20;flags.push("⚠️ Favorite severely over-seeded");}
-      else if(over>40){boost+=0.13;flags.push("⚠️ Favorite metrics trail their seed");}
-      else if(over>18){boost+=0.06;flags.push("⚠️ Fav slightly inflated seed");}
+      if(over>70){boost+=0.10;flags.push("⚠️ Favorite severely over-seeded");}
+      else if(over>40){boost+=0.06;flags.push("⚠️ Favorite metrics trail their seed");}
+      else if(over>18){boost+=0.03;flags.push("⚠️ Fav slightly inflated seed");}
     }
     // 3. Cinderella momentum — double-digit seed that survived R64 is battle-hardened
     // NC State 2024 (11), Loyola 2018 (11), Oregon State 2021 (12), Princeton 2023 (15)
     if(dog.seed>=10&&(dog.roundsWon||0)>=1){
-      boost+=0.14;flags.push("🏃 Cinderella momentum — survived R64, no pressure");
+      boost+=0.08;flags.push("🏃 Cinderella momentum — survived R64, no pressure");
     } else if(dog.seed>=7&&(dog.roundsWon||0)>=1){
-      boost+=0.06;flags.push("💫 R64 survivor — tournament confidence");
+      boost+=0.03;flags.push("💫 R64 survivor — tournament confidence");
     }
     // 4. Top-3 seed that may have been tested in R64 (metrics suggest they aren't elite)
     if(fav.seed<=4&&favNet&&(favNet-favExpNet)>25){
-      boost+=0.10;flags.push("😰 Favorite over-seeded — likely grinded in R64");
+      boost+=0.05;flags.push("😰 Favorite over-seeded — likely grinded in R64");
     }
     // 5. Elite underdog defense — coaches have 48hr to study film; D wins in short-turnaround
     if(dog.data?.opp&&dog.seed>=7){
       const bench={7:70,8:69,9:70,10:69,11:68,12:67,13:70,14:72,15:74,16:76}[dog.seed]||70;
       const elite=bench-dog.data.opp;
-      if(elite>10){boost+=0.18;flags.push("🛡 Elite D for seed — top-40 nationally");}
-      else if(elite>6){boost+=0.11;flags.push("🛡 Strong defense vs seed benchmark");}
-      else if(elite>3){boost+=0.05;}
+      if(elite>10){boost+=0.09;flags.push("🛡 Elite D for seed — top-40 nationally");}
+      else if(elite>6){boost+=0.05;flags.push("🛡 Strong defense vs seed benchmark");}
+      else if(elite>3){boost+=0.02;}
     }
     // 6. Vulnerable favorite defense — perimeter D is systematically exploitable with film
     if(fav.data?.opp&&fav.seed<=5){
       const bench={1:60,2:62,3:64,4:65,5:67}[fav.seed]||65;
       const weak=fav.data.opp-bench;
-      if(weak>8){boost+=0.15;flags.push("🚨 Favorite has weak defense — 48hr prep time amplifies this");}
-      else if(weak>5){boost+=0.08;flags.push("🚨 Favorite porous perimeter D");}
-      else if(weak>2){boost+=0.03;}
+      if(weak>8){boost+=0.07;flags.push("🚨 Favorite has weak defense — 48hr prep time amplifies this");}
+      else if(weak>5){boost+=0.04;flags.push("🚨 Favorite porous perimeter D");}
+      else if(weak>2){boost+=0.02;}
     }
     // 7. Slow tempo — fewer possessions → variance stays high (Princeton 2023, Yale 2016)
     if(dog.data?.tempo){
-      if(dog.data.tempo<63){boost+=0.12;flags.push("🐢 Very slow pace — high single-game variance");}
-      else if(dog.data.tempo<66){boost+=0.07;flags.push("🐢 Deliberate pace — controls possessions");}
-      else if(dog.data.tempo<68){boost+=0.02;}
+      if(dog.data.tempo<63){boost+=0.06;flags.push("🐢 Very slow pace — high single-game variance");}
+      else if(dog.data.tempo<66){boost+=0.03;flags.push("🐢 Deliberate pace — controls possessions");}
+      else if(dog.data.tempo<68){boost+=0.01;}
     }
     // 8. Conference tournament winner — sustained peak form across multiple rounds
-    if(dog.data?.conf_tourney_winner){boost+=0.10;flags.push("🏆 Conf. tourney winner — sustained peak form");}
+    if(dog.data?.conf_tourney_winner){boost+=0.05;flags.push("🏆 Conf. tourney winner — sustained peak form");}
     // 9. Conference pedigree in R32 context
     const conf=dog.teamObj?.conf||"";
     const bigConfs=["Big Ten","Big 12","SEC","ACC","Big East","Pac-12","Pac 12"];
     const isBigConf=bigConfs.some(c=>conf.includes(c));
     if(isBigConf&&dog.seed>=5&&dog.seed<=8){
-      boost+=0.06;flags.push("🎓 High-major 5-8 seed — deep schedule battle-hardened");
+      boost+=0.03;flags.push("🎓 High-major 5-8 seed — deep schedule battle-hardened");
     } else if(conf.includes("Missouri Valley")||conf==="MVC"){
-      boost+=0.10;flags.push("💪 MVC — Cinderella pedigree, systematically underseeded");
+      boost+=0.05;flags.push("💪 MVC — Cinderella pedigree, systematically underseeded");
     } else if(conf.includes("Atlantic 10")||conf.includes("A-10")){
-      boost+=0.07;flags.push("💪 A-10 — physically tough, defense-oriented conference");
+      boost+=0.03;flags.push("💪 A-10 — physically tough, defense-oriented conference");
     } else if(conf.includes("Ivy")){
-      boost+=0.09;flags.push("🎓 Ivy — veteran roster, reads defenses exceptionally well");
-    } else if(conf.includes("American")||conf.includes("Mountain West")){boost+=0.04;}
+      boost+=0.05;flags.push("🎓 Ivy — veteran roster, reads defenses exceptionally well");
+    } else if(conf.includes("American")||conf.includes("Mountain West")){boost+=0.02;}
     // 10. Turnover-forcing defense — extra possessions are decisive in elimination basketball
     if(dog.data?.opp_tov_rate){
-      if(dog.data.opp_tov_rate>22){boost+=0.08;flags.push("💥 Forces turnovers — elite pressure defense");}
-      else if(dog.data.opp_tov_rate>19){boost+=0.04;flags.push("💥 Above-avg turnover forcing");}
+      if(dog.data.opp_tov_rate>22){boost+=0.04;flags.push("💥 Forces turnovers — elite pressure defense");}
+      else if(dog.data.opp_tov_rate>19){boost+=0.02;flags.push("💥 Above-avg turnover forcing");}
     }
-    // R32 cap — seed gaps are smaller than R64, so boosts should be tighter
-    const maxBoost=seedGap>=8?0.50:seedGap>=5?0.65:seedGap>=3?0.80:seedGap>=2?0.90:1.0;
+    // Cap: boost nudges probability, doesn't decide winner. Large-gap upsets need model to be close.
+    const maxBoost=seedGap>=8?0.22:seedGap>=5?0.30:seedGap>=3?0.42:seedGap>=2?0.52:0.60;
     return{boost:Math.min(boost,maxBoost),flags};
   };
 
@@ -2400,71 +2401,71 @@ function NCAAOraclePage(){
     const dogRW=dog.roundsWon||0;
     // 1. Cinderella momentum — THE defining S16 upset factor (2+ wins = peak form + zero pressure)
     // Saint Peter's 2022 (15→14→3), NC State 2024 (11→6→2→4), Loyola Chicago 2018 (11→6→9→7)
-    if(dogRW>=2&&dog.seed>=10){boost+=0.22;flags.push("🏃 Elite Cinderella — 2+ wins, zero pressure, crowd loves them");}
-    else if(dogRW>=2&&dog.seed>=7){boost+=0.16;flags.push("🏃 Deep tournament run — 2 wins in, momentum peaking");}
-    else if(dogRW>=1&&dog.seed>=8){boost+=0.08;flags.push("💫 S16 survivor — tournament-hardened, 5 days of film");}
+    if(dogRW>=2&&dog.seed>=10){boost+=0.11;flags.push("🏃 Elite Cinderella — 2+ wins, zero pressure, crowd loves them");}
+    else if(dogRW>=2&&dog.seed>=7){boost+=0.08;flags.push("🏃 Deep tournament run — 2 wins in, momentum peaking");}
+    else if(dogRW>=1&&dog.seed>=8){boost+=0.04;flags.push("💫 S16 survivor — tournament-hardened, 5 days of film");}
     // 2. "Giant killer" — dog already beat a higher seed (R32), carries that mental edge
-    if(dogRW>=2&&dog.seed>=7){boost+=0.08;flags.push("🗡 Giant killer — already slayed a top seed this tournament");}
+    if(dogRW>=2&&dog.seed>=7){boost+=0.04;flags.push("🗡 Giant killer — already slayed a top seed this tournament");}
     // 3. NET/KenPom underseeding — metrics say this team is better than bracket position
     if(dogNet){
       const under=dogExpNet-dogNet;
-      if(under>80){boost+=0.20;flags.push("📊 Severely underseeded — elite metrics for seed");}
-      else if(under>50){boost+=0.14;flags.push("📊 Underseeded by NET rank");}
-      else if(under>28){boost+=0.08;flags.push("📊 Better analytics than seed suggests");}
-      else if(under>12){boost+=0.03;}
+      if(under>80){boost+=0.10;flags.push("📊 Severely underseeded — elite metrics for seed");}
+      else if(under>50){boost+=0.07;flags.push("📊 Underseeded by NET rank");}
+      else if(under>28){boost+=0.04;flags.push("📊 Better analytics than seed suggests");}
+      else if(under>12){boost+=0.01;}
     }
     // 4. Over-seeded favorite — 2 rounds of data now expose teams that outran their metrics
     if(favNet){
       const over=favNet-favExpNet;
-      if(over>75){boost+=0.18;flags.push("⚠️ Favorite severely over-seeded — 2 rounds have exposed them");}
-      else if(over>45){boost+=0.12;flags.push("⚠️ Favorite metrics trail their seed");}
-      else if(over>20){boost+=0.05;flags.push("⚠️ Favorite slightly inflated");}
+      if(over>75){boost+=0.09;flags.push("⚠️ Favorite severely over-seeded — 2 rounds have exposed them");}
+      else if(over>45){boost+=0.06;flags.push("⚠️ Favorite metrics trail their seed");}
+      else if(over>20){boost+=0.02;flags.push("⚠️ Favorite slightly inflated");}
     }
     // 5. Elite defense sustained through tournament — hallmark S16 Cinderella trait
     // Loyola 2018 (AdjD #5), Saint Peter's 2022 (top-15 AdjD), FAU 2023 (elite D for 9-seed)
     if(dog.data?.opp&&dog.seed>=6){
       const bench={6:67,7:68,8:68,9:69,10:69,11:68,12:67,13:70,14:72,15:74,16:76}[dog.seed]||69;
       const elite=bench-dog.data.opp;
-      if(elite>12){boost+=0.18;flags.push("🛡 Elite D identity — sustained through 2 tournament games");}
-      else if(elite>8){boost+=0.12;flags.push("🛡 Strong defensive identity vs seed");}
-      else if(elite>4){boost+=0.06;flags.push("🛡 Above-avg defense — amplified with full prep time");}
-      else if(elite>2){boost+=0.02;}
+      if(elite>12){boost+=0.09;flags.push("🛡 Elite D identity — sustained through 2 tournament games");}
+      else if(elite>8){boost+=0.06;flags.push("🛡 Strong defensive identity vs seed");}
+      else if(elite>4){boost+=0.03;flags.push("🛡 Above-avg defense — amplified with full prep time");}
+      else if(elite>2){boost+=0.01;}
     }
     // 6. Vulnerable favorite defense — Syracuse 2016 zone shredded Virginia's lack of perimeter D
     if(fav.data?.opp&&fav.seed<=4){
       const bench={1:59,2:61,3:63,4:64}[fav.seed]||63;
       const weak=fav.data.opp-bench;
-      if(weak>9){boost+=0.14;flags.push("🚨 Favorite weak D — 5 days of film prep makes this devastating");}
-      else if(weak>5){boost+=0.08;flags.push("🚨 Favorite porous perimeter defense");}
-      else if(weak>2){boost+=0.03;}
+      if(weak>9){boost+=0.07;flags.push("🚨 Favorite weak D — 5 days of film prep makes this devastating");}
+      else if(weak>5){boost+=0.04;flags.push("🚨 Favorite porous perimeter defense");}
+      else if(weak>2){boost+=0.01;}
     }
     // 7. Tempo control — pace control is decisive in S16 (fewer possessions = variance stays high)
     // Syracuse zone slowed Virginia to 53 possessions in 2016; Princeton 2023 style
     if(dog.data?.tempo){
-      if(dog.data.tempo<62){boost+=0.12;flags.push("🐢 Extreme pace control — limits possessions each game");}
-      else if(dog.data.tempo<65){boost+=0.07;flags.push("🐢 Slow-paced system — difficult style adjustment for favorites");}
-      else if(dog.data.tempo<68){boost+=0.02;}
+      if(dog.data.tempo<62){boost+=0.06;flags.push("🐢 Extreme pace control — limits possessions each game");}
+      else if(dog.data.tempo<65){boost+=0.03;flags.push("🐢 Slow-paced system — difficult style adjustment for favorites");}
+      else if(dog.data.tempo<68){boost+=0.01;}
     }
     // 8. Conference tournament winner — 5+ game winning streak entering S16
-    if(dog.data?.conf_tourney_winner){boost+=0.09;flags.push("🏆 Conf. tourney winner — peak form sustained deep into March");}
+    if(dog.data?.conf_tourney_winner){boost+=0.05;flags.push("🏆 Conf. tourney winner — peak form sustained deep into March");}
     // 9. Conference Cinderella pedigree in S16
     const conf=dog.teamObj?.conf||"";
-    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.09;flags.push("💪 MVC — Loyola Chicago S16 pedigree; routinely underseeded");}
-    else if(conf.includes("Ivy")){boost+=0.08;flags.push("🎓 Ivy in S16 — historic run, veteran IQ, no fear");}
-    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.06;flags.push("💪 A-10 — physically tough, ready for S16 grind");}
-    else if(conf.includes("American")||conf.includes("Mountain West")||conf.includes("West Coast")||conf.includes("WCC")){boost+=0.04;}
+    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.05;flags.push("💪 MVC — Loyola Chicago S16 pedigree; routinely underseeded");}
+    else if(conf.includes("Ivy")){boost+=0.04;flags.push("🎓 Ivy in S16 — historic run, veteran IQ, no fear");}
+    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.03;flags.push("💪 A-10 — physically tough, ready for S16 grind");}
+    else if(conf.includes("American")||conf.includes("Mountain West")||conf.includes("West Coast")||conf.includes("WCC")){boost+=0.02;}
     // 10. Turnover-forcing pressure D — 5 full days of prep makes traps/press most lethal
     if(dog.data?.opp_tov_rate){
-      if(dog.data.opp_tov_rate>23){boost+=0.09;flags.push("💥 Elite turnover-forcing — pressure D maximized with full prep time");}
-      else if(dog.data.opp_tov_rate>20){boost+=0.05;flags.push("💥 Above-avg turnover forcing");}
+      if(dog.data.opp_tov_rate>23){boost+=0.05;flags.push("💥 Elite turnover-forcing — pressure D maximized with full prep time");}
+      else if(dog.data.opp_tov_rate>20){boost+=0.02;flags.push("💥 Above-avg turnover forcing");}
     }
     // 11. Elite shooting efficiency — eFG% explosion potential (NC State 2024, Oregon State 2021)
     if(dog.data?.efg_pct&&dog.seed>=7){
-      if(dog.data.efg_pct>0.555){boost+=0.08;flags.push("🔥 Elite eFG% — can explode offensively any game");}
-      else if(dog.data.efg_pct>0.535){boost+=0.04;flags.push("🔥 Strong shooting efficiency vs seed");}
+      if(dog.data.efg_pct>0.555){boost+=0.04;flags.push("🔥 Elite eFG% — can explode offensively any game");}
+      else if(dog.data.efg_pct>0.535){boost+=0.02;flags.push("🔥 Strong shooting efficiency vs seed");}
     }
-    // S16 cap — seed gaps are smallest here; boosts are most conservative
-    const maxBoost=seedGap>=9?0.45:seedGap>=6?0.58:seedGap>=4?0.70:seedGap>=2?0.80:0.90;
+    // S16 cap — seed gaps reflect survivor matchups; nudge only, model decides
+    const maxBoost=seedGap>=9?0.22:seedGap>=6?0.30:seedGap>=4?0.40:seedGap>=2?0.50:0.58;
     return{boost:Math.min(boost,maxBoost),flags};
   };
 
@@ -2493,81 +2494,77 @@ function NCAAOraclePage(){
     const dogRW=dog.roundsWon||0;
     // 1. Full Cinderella run — 3 wins, zero pressure, peak momentum
     // Loyola 2018 (11→6→9→7), NC State 2024 (11→6→2→4), Syracuse 2016 (10→7→11→1→)
-    if(dogRW>=3&&dog.seed>=10){boost+=0.25;flags.push("🏃 Elite Cinderella — 3 wins in, fully loose, at peak of run");}
-    else if(dogRW>=3&&dog.seed>=7){boost+=0.18;flags.push("🏃 Deep run — 3 tournament wins, playing with pure momentum");}
-    else if(dogRW>=2&&dog.seed>=6){boost+=0.10;flags.push("💫 Strong tournament run — 2 wins in, nothing to lose");}
+    if(dogRW>=3&&dog.seed>=10){boost+=0.13;flags.push("🏃 Elite Cinderella — 3 wins in, fully loose, at peak of run");}
+    else if(dogRW>=3&&dog.seed>=7){boost+=0.09;flags.push("🏃 Deep run — 3 tournament wins, playing with pure momentum");}
+    else if(dogRW>=2&&dog.seed>=6){boost+=0.05;flags.push("💫 Strong tournament run — 2 wins in, nothing to lose");}
     // 2. "House money" mental edge — underdog plays loose; favorite feels Final Four pressure
-    // This is the defining E8 psychological factor — both 2016 and 2018 Cinderellas cited this
-    if(dogRW>=3){boost+=0.09;flags.push("🎲 Pure house money — already a success story; favorite has everything to lose");}
-    else if(dogRW>=2&&dog.seed>=7){boost+=0.05;flags.push("🎲 Underdog has zero pressure in E8");}
+    if(dogRW>=3){boost+=0.05;flags.push("🎲 Pure house money — already a success story; favorite has everything to lose");}
+    else if(dogRW>=2&&dog.seed>=7){boost+=0.02;flags.push("🎲 Underdog has zero pressure in E8");}
     // 3. NET/KenPom underseeding — the analytics foundation of E8 upsets
     // UNC 2022 was KenPom top-10 as an 8-seed; Loyola 2018 KenPom #19 as 11-seed
     if(dogNet){
       const under=dogExpNet-dogNet;
-      if(under>90){boost+=0.22;flags.push("📊 Massively underseeded — elite analytics; shouldn't be an underdog");}
-      else if(under>55){boost+=0.15;flags.push("📊 Underseeded by NET — 3 rounds of data confirm it");}
-      else if(under>30){boost+=0.08;flags.push("📊 Better metrics than seed suggests");}
-      else if(under>15){boost+=0.03;}
+      if(under>90){boost+=0.11;flags.push("📊 Massively underseeded — elite analytics; shouldn't be an underdog");}
+      else if(under>55){boost+=0.08;flags.push("📊 Underseeded by NET — 3 rounds of data confirm it");}
+      else if(under>30){boost+=0.04;flags.push("📊 Better metrics than seed suggests");}
+      else if(under>15){boost+=0.01;}
     }
     // 4. Over-seeded favorite — 3 rounds have exposed teams overrunning their KenPom
     if(favNet){
       const over=favNet-favExpNet;
-      if(over>80){boost+=0.18;flags.push("⚠️ Favorite severely over-seeded — 3 rounds of data now confirm it");}
-      else if(over>50){boost+=0.12;flags.push("⚠️ Favorite metrics below seed — exposure deepens in E8");}
-      else if(over>22){boost+=0.05;flags.push("⚠️ Favorite slightly over-seeded");}
+      if(over>80){boost+=0.09;flags.push("⚠️ Favorite severely over-seeded — 3 rounds of data now confirm it");}
+      else if(over>50){boost+=0.06;flags.push("⚠️ Favorite metrics below seed — exposure deepens in E8");}
+      else if(over>22){boost+=0.02;flags.push("⚠️ Favorite slightly over-seeded");}
     }
     // 5. Unique defensive system — zone/pack-line with 1 full week of prep still confounds
-    // Syracuse 2016 zone held Michigan State (2-seed) to their worst offensive performance
-    // Proxy: slow tempo + elite defense = system team with style-matchup advantage
     if(dog.data?.opp&&dog.data?.tempo&&dog.data.tempo<66){
       const benchD=70-(dog.seed*0.4);
       const elite=benchD-dog.data.opp;
-      if(elite>8){boost+=0.14;flags.push("🔒 Unique system + slow tempo — even 1 week can't fully neutralize zone/pack-line");}
-      else if(elite>4){boost+=0.08;flags.push("🔒 Defensive system + pace control — exploits favorites at E8 level");}
+      if(elite>8){boost+=0.07;flags.push("🔒 Unique system + slow tempo — even 1 week can't fully neutralize zone/pack-line");}
+      else if(elite>4){boost+=0.04;flags.push("🔒 Defensive system + pace control — exploits favorites at E8 level");}
     }
     // 6. Elite sustained defense — must have proven D through 3 consecutive tournament games
-    // South Carolina 2017 (AdjD top-20), Loyola 2018 (AdjD #5), UNC 2022 (elite D/rebounding)
     if(dog.data?.opp&&dog.seed>=5){
       const bench={5:65,6:66,7:67,8:67,9:68,10:68,11:67,12:66,13:69,14:71,15:73}[dog.seed]||68;
       const elite=bench-dog.data.opp;
-      if(elite>13){boost+=0.18;flags.push("🛡 Elite D identity — top-15 nationally; proven through 3 tournament games");}
-      else if(elite>8){boost+=0.11;flags.push("🛡 Strong defensive program — game plan set for full week");}
-      else if(elite>4){boost+=0.05;flags.push("🛡 Above-avg defense vs seed level");}
+      if(elite>13){boost+=0.09;flags.push("🛡 Elite D identity — top-15 nationally; proven through 3 tournament games");}
+      else if(elite>8){boost+=0.06;flags.push("🛡 Strong defensive program — game plan set for full week");}
+      else if(elite>4){boost+=0.02;flags.push("🛡 Above-avg defense vs seed level");}
     }
     // 7. Vulnerable favorite defense — 1 full week of film reveals every tendency
     if(fav.data?.opp&&fav.seed<=3){
       const bench={1:58,2:60,3:62}[fav.seed]||62;
       const weak=fav.data.opp-bench;
-      if(weak>10){boost+=0.14;flags.push("🚨 Favorite weak D — fully exposed with 1 week of film");}
-      else if(weak>6){boost+=0.08;flags.push("🚨 Favorite porous perimeter D — maximum scouting exploitation");}
-      else if(weak>3){boost+=0.03;}
+      if(weak>10){boost+=0.07;flags.push("🚨 Favorite weak D — fully exposed with 1 week of film");}
+      else if(weak>6){boost+=0.04;flags.push("🚨 Favorite porous perimeter D — maximum scouting exploitation");}
+      else if(weak>3){boost+=0.01;}
     }
     // 8. Tempo control — pace limits possessions; decisive in single-elimination E8
     if(dog.data?.tempo){
-      if(dog.data.tempo<62){boost+=0.11;flags.push("🐢 Extreme pace control — slows E8 to a grind; limits fav's offensive rhythm");}
-      else if(dog.data.tempo<65){boost+=0.06;flags.push("🐢 Deliberate system — controls game flow in E8");}
-      else if(dog.data.tempo<68){boost+=0.02;}
+      if(dog.data.tempo<62){boost+=0.06;flags.push("🐢 Extreme pace control — slows E8 to a grind; limits fav's offensive rhythm");}
+      else if(dog.data.tempo<65){boost+=0.03;flags.push("🐢 Deliberate system — controls game flow in E8");}
+      else if(dog.data.tempo<68){boost+=0.01;}
     }
     // 9. Conference tournament winner — sustained peak form 5+ consecutive wins entering E8
-    if(dog.data?.conf_tourney_winner){boost+=0.08;flags.push("🏆 Conf. tourney winner — peak form sustained deepest into March");}
+    if(dog.data?.conf_tourney_winner){boost+=0.04;flags.push("🏆 Conf. tourney winner — peak form sustained deepest into March");}
     // 10. Conference Cinderella pedigree
     const conf=dog.teamObj?.conf||"";
-    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.09;flags.push("💪 MVC — Loyola Chicago E8 pedigree; this conference makes Final Fours");}
-    else if(conf.includes("Ivy")){boost+=0.08;flags.push("🎓 Ivy in E8 — unprecedented run, veteran IQ, historically unique");}
-    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.06;flags.push("💪 A-10 — physically tough, built for grinding E8 battles");}
-    else if(conf.includes("American")||conf.includes("Mountain West")){boost+=0.04;}
+    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.05;flags.push("💪 MVC — Loyola Chicago E8 pedigree; this conference makes Final Fours");}
+    else if(conf.includes("Ivy")){boost+=0.04;flags.push("🎓 Ivy in E8 — unprecedented run, veteran IQ, historically unique");}
+    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.03;flags.push("💪 A-10 — physically tough, built for grinding E8 battles");}
+    else if(conf.includes("American")||conf.includes("Mountain West")){boost+=0.02;}
     // 11. Elite eFG% — shooting explosion can end any favorite's tournament in one game
     if(dog.data?.efg_pct&&dog.seed>=5){
-      if(dog.data.efg_pct>0.560){boost+=0.09;flags.push("🔥 Elite eFG% — explosive offense can beat anyone on a given E8 night");}
-      else if(dog.data.efg_pct>0.540){boost+=0.05;flags.push("🔥 Strong shooting efficiency vs seed");}
+      if(dog.data.efg_pct>0.560){boost+=0.05;flags.push("🔥 Elite eFG% — explosive offense can beat anyone on a given E8 night");}
+      else if(dog.data.efg_pct>0.540){boost+=0.02;flags.push("🔥 Strong shooting efficiency vs seed");}
     }
     // 12. Turnover-forcing — maximum impact in E8 with 1 week of press/trap film prep
     if(dog.data?.opp_tov_rate){
-      if(dog.data.opp_tov_rate>23){boost+=0.08;flags.push("💥 Elite turnover-forcing — 1 week of prep maximizes trap/press impact");}
-      else if(dog.data.opp_tov_rate>20){boost+=0.04;flags.push("💥 Strong turnover-forcing defense");}
+      if(dog.data.opp_tov_rate>23){boost+=0.04;flags.push("💥 Elite turnover-forcing — 1 week of prep maximizes trap/press impact");}
+      else if(dog.data.opp_tov_rate>20){boost+=0.02;flags.push("💥 Strong turnover-forcing defense");}
     }
-    // E8 cap — these are the most contested matchups; most conservative ceilings
-    const maxBoost=seedGap>=8?0.40:seedGap>=5?0.52:seedGap>=3?0.63:seedGap>=2?0.73:0.82;
+    // E8 cap — deepest round with largest seed gaps; nudge only, efficiency model leads
+    const maxBoost=seedGap>=8?0.22:seedGap>=5?0.30:seedGap>=3?0.40:seedGap>=2?0.50:0.58;
     return{boost:Math.min(boost,maxBoost),flags};
   };
 

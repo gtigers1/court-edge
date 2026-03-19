@@ -2374,6 +2374,100 @@ function NCAAOraclePage(){
     return{boost:Math.min(boost,maxBoost),flags};
   };
 
+  // ── 10-year Sweet 16 upset pattern analysis (2015–2024) ──────────────────────
+  // S16 upsets are fundamentally different: teams have 5 full days of film prep,
+  // all survivors are proven tournament competitors, and Cinderella momentum peaks here.
+  // Key patterns from 2015-2024 S16 upsets:
+  //  1. Cinderella runs (2+ wins) — NC State 2024 (11), Saint Peter's 2022 (15), Loyola 2018 (11)
+  //     These teams carry ZERO pressure and massive crowd energy going into S16
+  //  2. Elite sustained defense — Loyola 2018 (AdjD #5), Saint Peter's 2022, FAU 2023 — D wins
+  //  3. Unique defensive system — Syracuse 2016 zone beat Virginia 1-seed; 5 days prep = advantage
+  //  4. NET rank underseeding — FAU 2023 (9-seed, KenPom ~50); Oregon State 2021 (12, KP top-40)
+  //  5. Over-seeded favorites exposed — 2 rounds of data reveal metrics below seed expectation
+  //  6. Vulnerable favorite defense — perimeter D breakdown amplified with full prep time
+  //  7. Slow tempo — pace control is decisive in S16 (fewer possessions = more variance per game)
+  //  8. Veteran/graduate-heavy rosters — Wisconsin 2015, South Carolina 2017; IQ beats talent
+  //  9. Conference tournament winner — sustained peak form deep into March
+  // 10. Turnover-forcing pressure D — 5 days of prep makes press/trap defenses most lethal
+  // 11. Elite shooting efficiency — eFG% explosion potential (NC State 2024, Oregon State 2021)
+  const calcS16UpsetBoost=(dog,fav)=>{
+    let boost=0;const flags=[];
+    const seedGap=dog.seed-fav.seed;
+    const dogExpNet=SEED_TO_NET_AVG[dog.seed]||(dog.seed*22);
+    const favExpNet=SEED_TO_NET_AVG[fav.seed]||(fav.seed*22);
+    const dogNet=dog.data?.kenpom_rank||null;
+    const favNet=fav.data?.kenpom_rank||null;
+    const dogRW=dog.roundsWon||0;
+    // 1. Cinderella momentum — THE defining S16 upset factor (2+ wins = peak form + zero pressure)
+    // Saint Peter's 2022 (15→14→3), NC State 2024 (11→6→2→4), Loyola Chicago 2018 (11→6→9→7)
+    if(dogRW>=2&&dog.seed>=10){boost+=0.22;flags.push("🏃 Elite Cinderella — 2+ wins, zero pressure, crowd loves them");}
+    else if(dogRW>=2&&dog.seed>=7){boost+=0.16;flags.push("🏃 Deep tournament run — 2 wins in, momentum peaking");}
+    else if(dogRW>=1&&dog.seed>=8){boost+=0.08;flags.push("💫 S16 survivor — tournament-hardened, 5 days of film");}
+    // 2. "Giant killer" — dog already beat a higher seed (R32), carries that mental edge
+    if(dogRW>=2&&dog.seed>=7){boost+=0.08;flags.push("🗡 Giant killer — already slayed a top seed this tournament");}
+    // 3. NET/KenPom underseeding — metrics say this team is better than bracket position
+    if(dogNet){
+      const under=dogExpNet-dogNet;
+      if(under>80){boost+=0.20;flags.push("📊 Severely underseeded — elite metrics for seed");}
+      else if(under>50){boost+=0.14;flags.push("📊 Underseeded by NET rank");}
+      else if(under>28){boost+=0.08;flags.push("📊 Better analytics than seed suggests");}
+      else if(under>12){boost+=0.03;}
+    }
+    // 4. Over-seeded favorite — 2 rounds of data now expose teams that outran their metrics
+    if(favNet){
+      const over=favNet-favExpNet;
+      if(over>75){boost+=0.18;flags.push("⚠️ Favorite severely over-seeded — 2 rounds have exposed them");}
+      else if(over>45){boost+=0.12;flags.push("⚠️ Favorite metrics trail their seed");}
+      else if(over>20){boost+=0.05;flags.push("⚠️ Favorite slightly inflated");}
+    }
+    // 5. Elite defense sustained through tournament — hallmark S16 Cinderella trait
+    // Loyola 2018 (AdjD #5), Saint Peter's 2022 (top-15 AdjD), FAU 2023 (elite D for 9-seed)
+    if(dog.data?.opp&&dog.seed>=6){
+      const bench={6:67,7:68,8:68,9:69,10:69,11:68,12:67,13:70,14:72,15:74,16:76}[dog.seed]||69;
+      const elite=bench-dog.data.opp;
+      if(elite>12){boost+=0.18;flags.push("🛡 Elite D identity — sustained through 2 tournament games");}
+      else if(elite>8){boost+=0.12;flags.push("🛡 Strong defensive identity vs seed");}
+      else if(elite>4){boost+=0.06;flags.push("🛡 Above-avg defense — amplified with full prep time");}
+      else if(elite>2){boost+=0.02;}
+    }
+    // 6. Vulnerable favorite defense — Syracuse 2016 zone shredded Virginia's lack of perimeter D
+    if(fav.data?.opp&&fav.seed<=4){
+      const bench={1:59,2:61,3:63,4:64}[fav.seed]||63;
+      const weak=fav.data.opp-bench;
+      if(weak>9){boost+=0.14;flags.push("🚨 Favorite weak D — 5 days of film prep makes this devastating");}
+      else if(weak>5){boost+=0.08;flags.push("🚨 Favorite porous perimeter defense");}
+      else if(weak>2){boost+=0.03;}
+    }
+    // 7. Tempo control — pace control is decisive in S16 (fewer possessions = variance stays high)
+    // Syracuse zone slowed Virginia to 53 possessions in 2016; Princeton 2023 style
+    if(dog.data?.tempo){
+      if(dog.data.tempo<62){boost+=0.12;flags.push("🐢 Extreme pace control — limits possessions each game");}
+      else if(dog.data.tempo<65){boost+=0.07;flags.push("🐢 Slow-paced system — difficult style adjustment for favorites");}
+      else if(dog.data.tempo<68){boost+=0.02;}
+    }
+    // 8. Conference tournament winner — 5+ game winning streak entering S16
+    if(dog.data?.conf_tourney_winner){boost+=0.09;flags.push("🏆 Conf. tourney winner — peak form sustained deep into March");}
+    // 9. Conference Cinderella pedigree in S16
+    const conf=dog.teamObj?.conf||"";
+    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.09;flags.push("💪 MVC — Loyola Chicago S16 pedigree; routinely underseeded");}
+    else if(conf.includes("Ivy")){boost+=0.08;flags.push("🎓 Ivy in S16 — historic run, veteran IQ, no fear");}
+    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.06;flags.push("💪 A-10 — physically tough, ready for S16 grind");}
+    else if(conf.includes("American")||conf.includes("Mountain West")||conf.includes("West Coast")||conf.includes("WCC")){boost+=0.04;}
+    // 10. Turnover-forcing pressure D — 5 full days of prep makes traps/press most lethal
+    if(dog.data?.opp_tov_rate){
+      if(dog.data.opp_tov_rate>23){boost+=0.09;flags.push("💥 Elite turnover-forcing — pressure D maximized with full prep time");}
+      else if(dog.data.opp_tov_rate>20){boost+=0.05;flags.push("💥 Above-avg turnover forcing");}
+    }
+    // 11. Elite shooting efficiency — eFG% explosion potential (NC State 2024, Oregon State 2021)
+    if(dog.data?.efg_pct&&dog.seed>=7){
+      if(dog.data.efg_pct>0.555){boost+=0.08;flags.push("🔥 Elite eFG% — can explode offensively any game");}
+      else if(dog.data.efg_pct>0.535){boost+=0.04;flags.push("🔥 Strong shooting efficiency vs seed");}
+    }
+    // S16 cap — seed gaps are smallest here; boosts are most conservative
+    const maxBoost=seedGap>=9?0.45:seedGap>=6?0.58:seedGap>=4?0.70:seedGap>=2?0.80:0.90;
+    return{boost:Math.min(boost,maxBoost),flags};
+  };
+
   // BT rating: seed (calibrated to 40yr history) + SOS + conf — no ESPN needed
   const btRating=(name,conf,seed)=>{
     const base=SEED_BT[Math.max(0,Math.min(15,(seed||8)-1))];
@@ -2420,11 +2514,11 @@ function NCAAOraclePage(){
     }
     let blended=Math.min(0.97,Math.max(0.03,modelP*(1-blendW)+histForT1*blendW));
     let upsetFlags=[];
-    // Apply 10-year upset pattern analysis for R64 and R32
-    if((round==="R64"||round==="R32")&&t1.seed!==t2.seed){
+    // Apply 10-year upset pattern analysis for R64, R32, and S16
+    if((round==="R64"||round==="R32"||round==="S16")&&t1.seed!==t2.seed){
       const dog=t1.seed>t2.seed?t1:t2;
       const fav=t1.seed>t2.seed?t2:t1;
-      const {boost,flags}=round==="R64"?calcR64UpsetBoost(dog,fav):calcR32UpsetBoost(dog,fav);
+      const {boost,flags}=round==="R64"?calcR64UpsetBoost(dog,fav):round==="R32"?calcR32UpsetBoost(dog,fav):calcS16UpsetBoost(dog,fav);
       if(boost>0){
         // Apply boost in log-odds space so probability stays bounded
         const dogIsT1=t1.seed>t2.seed;
@@ -2444,7 +2538,7 @@ function NCAAOraclePage(){
     const mk=s=>({name:sel[s]?sel[s].name:(s+" Seed"),seed:s,teamObj:sel[s]||null,data:sel[s]?cstore[sel[s].id]||null:null,roundsWon:0});
     const r64=R64_PAIRS.map(([s1,s2])=>{const t1=mk(s1),t2=mk(s2);const g=runGame(t1,t2,"R64");const w=g.p>=0.5?adv(t1):adv(t2);return{t1,t2,p:g.p,w,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"R64",upsetFlags:g.upsetFlags||[]};});
     const r32=[[0,1],[2,3],[4,5],[6,7]].map(([i,j])=>{const t1=r64[i].w,t2=r64[j].w;const g=runGame(t1,t2,"R32");const w=g.p>=0.5?adv(t1):adv(t2);return{t1,t2,p:g.p,w,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"R32",upsetFlags:g.upsetFlags||[]};});
-    const s16=[[0,1],[2,3]].map(([i,j])=>{const t1=r32[i].w,t2=r32[j].w;const g=runGame(t1,t2,"S16");const w=g.p>=0.5?adv(t1):adv(t2);return{t1,t2,p:g.p,w,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"S16"};});
+    const s16=[[0,1],[2,3]].map(([i,j])=>{const t1=r32[i].w,t2=r32[j].w;const g=runGame(t1,t2,"S16");const w=g.p>=0.5?adv(t1):adv(t2);return{t1,t2,p:g.p,w,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"S16",upsetFlags:g.upsetFlags||[]};});
     const g8=runGame(s16[0].w,s16[1].w,"E8");const w8=g8.p>=0.5?adv(s16[0].w):adv(s16[1].w);
     return{r64,r32,s16,e8:{t1:s16[0].w,t2:s16[1].w,p:g8.p,w:w8,dataMode:g8.dataMode,histRate:g8.histRate,dogSeed:g8.dogSeed,favSeed:g8.favSeed,round:"E8"}};
   };
@@ -2514,7 +2608,7 @@ function NCAAOraclePage(){
     const upsetAlert=!isUpset&&dogProb>=0.36&&game.t1.seed!==game.t2.seed;
     const hRate=game.histRate||0;
     const flags=game.upsetFlags||[];
-    const hasFactors=flags.length>0&&(game.round==="R64"||game.round==="R32");
+    const hasFactors=flags.length>0&&(game.round==="R64"||game.round==="R32"||game.round==="S16");
     const borderCol=isUpset?"#f97316":upsetAlert?"#eab30888":hasFactors&&dogProb>0.30?"#94a3b855":C.border;
     const shortenName=(n)=>n.replace(" Blue Devils","").replace(" Wildcats","").replace(" Bulldogs","").replace(" Tigers","").replace(" Jayhawks","").replace(" Tar Heels","").replace(" Volunteers","").replace(" Gators","").replace(" Longhorns","").replace(" Trojans","").replace(" RedHawks","");
     const R=({team,prob,win})=>(

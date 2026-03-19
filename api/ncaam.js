@@ -71,7 +71,10 @@ export default async function handler(req, res) {
     let daysSinceLastGame = 2, teamElo = 1500, teamGames = [];
     let sSF = 0, sAG = 0, sCnt = 0;
     try {
-      const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}/schedule`);
+      // Must specify season=2026&seasontype=2 (regular season) — without this, ESPN only
+      // returns the current postseason game (no score yet), giving sCnt=0 and falling back to AI.
+      // seasontype=2 = regular season (30-35 completed games with real scores).
+      const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}/schedule?season=2026&seasontype=2`);
       const schedJson = await schedResp.json();
       const completed = (schedJson?.events || []).filter(e => e.competitions?.[0]?.status?.type?.completed === true);
       if (completed.length > 0) {
@@ -86,7 +89,9 @@ export default async function handler(req, res) {
         const ours   = comp.competitors?.find(c => String(c.id) === teamNumId);
         const theirs = comp.competitors?.find(c => String(c.id) !== teamNumId);
         if (!ours || !theirs || ours.score == null || theirs.score == null) continue;
-        const s = parseFloat(ours.score)||0, t = parseFloat(theirs.score)||0;
+        // score can be a plain string (old format) or an object {value, displayValue} (new format)
+        const parseScore = v => typeof v === 'object' ? (v?.value ?? parseFloat(v?.displayValue) ?? 0) : parseFloat(v)||0;
+        const s = parseScore(ours.score), t = parseScore(theirs.score);
         if (s > 0 || t > 0) { sSF += s; sAG += t; sCnt++; }
         const win    = s > t ? 1 : 0;
         const isHome = ours.homeAway === "home";
@@ -105,8 +110,8 @@ export default async function handler(req, res) {
     // Schedule-computed PPG/OPP: lower threshold to 5 games (was 10)
     const schedPPG = sCnt >= 5 ? parseFloat((sSF / sCnt).toFixed(1)) : null;
     const schedOPP = sCnt >= 5 ? parseFloat((sAG / sCnt).toFixed(1)) : null;
-    if (schedPPG != null && sources.ppg == null) sources.ppg = `ESPN schedule scores (${sCnt} games)`;
-    if (schedOPP != null && sources.opp == null) sources.opp = `ESPN schedule scores (${sCnt} games)`;
+    if (schedPPG != null && sources.ppg == null) sources.ppg = `ESPN reg season scores (${sCnt} games)`;
+    if (schedOPP != null && sources.opp == null) sources.opp = `ESPN reg season scores (${sCnt} games)`;
 
     // ── 3. Extract player IDs + names from roster ────────────────────────────
     const athletes = rosterJson?.athletes || [];

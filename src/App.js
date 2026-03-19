@@ -2276,9 +2276,11 @@ function NCAAOraclePage(){
       if(offElite>7){boost+=0.08;flags.push("🔥 Elite offense for seed");}
       else if(offElite>4){boost+=0.04;flags.push("🔥 Strong offense vs seed");}
     }
-    // Tiered caps: 5v12 stays tight; 6v11 / 7v10 / 8v9 reflect their historically high upset rates.
-    // 6v11 = 38% hist upset rate, 7v10 = 40%, 8v9 = ~47% — these should flip regularly with good factors.
-    const maxBoost=seedGap>=10?0.15:seedGap>=7?0.22:seedGap>=5?0.45:seedGap>=3?0.58:0.68;
+    // R64 caps — calibrated to 40-year seed matchup records (1985-2024):
+    // 1v16=1.3%,  2v15=6.9%,  3v14=14.4%,  4v13=20.6%
+    // 5v12=35.6%, 6v11=38.8%, 7v10=38.9%  ← 6v11 and 7v10 are IDENTICAL historically → same cap
+    // 8v9=51.9%  ← 9-seeds win MORE than 8-seeds all-time; highest cap.
+    const maxBoost=seedGap>=13?0.08:seedGap>=11?0.14:seedGap>=9?0.22:seedGap>=7?0.32:seedGap>=2?0.56:0.72;
     return{boost:Math.min(boost,maxBoost),flags};
   };
 
@@ -2370,8 +2372,11 @@ function NCAAOraclePage(){
       if(dog.data.opp_tov_rate>22){boost+=0.04;flags.push("💥 Forces turnovers — elite pressure defense");}
       else if(dog.data.opp_tov_rate>19){boost+=0.02;flags.push("💥 Above-avg turnover forcing");}
     }
-    // Cap: boost nudges probability, doesn't decide winner. Large-gap upsets need model to be close.
-    const maxBoost=seedGap>=8?0.22:seedGap>=5?0.30:seedGap>=3?0.42:seedGap>=2?0.52:0.60;
+    // R32 caps — overall 20% upset rate, same as R64 but HIGHER per-gap because survivors have proven it.
+    // 1v8/9 type (~15-17% in R32) → boosted above R64's same gap because Cinderella momentum is real.
+    // 4v5/12-survivor type (~44%) → essentially a coin flip; factors should dominate.
+    // Key: a 12-seed that just beat a 5-seed is no longer an 80% underdog — they've proven themselves.
+    const maxBoost=seedGap>=8?0.34:seedGap>=5?0.50:seedGap>=3?0.64:0.74;
     return{boost:Math.min(boost,maxBoost),flags};
   };
 
@@ -2464,8 +2469,12 @@ function NCAAOraclePage(){
       if(dog.data.efg_pct>0.555){boost+=0.04;flags.push("🔥 Elite eFG% — can explode offensively any game");}
       else if(dog.data.efg_pct>0.535){boost+=0.02;flags.push("🔥 Strong shooting efficiency vs seed");}
     }
-    // S16 cap — seed gaps reflect survivor matchups; nudge only, model decides
-    const maxBoost=seedGap>=9?0.22:seedGap>=6?0.30:seedGap>=4?0.40:seedGap>=2?0.50:0.58;
+    // S16 caps — historically the HIGHEST upset rate of any round (21% overall, higher than R64/R32/E8).
+    // Why? 5 full days of prep (most of tournament), peak Cinderella momentum (2 wins already),
+    // and defensive systems (zone, slow tempo) are MOST dangerous with full film study.
+    // Double-digit seeds who reach S16 historically win ~45-48% of those games — nearly coin flip.
+    // Large-gap cap is HIGHEST here because of the 5-day prep advantage and proven Cinderella status.
+    const maxBoost=seedGap>=9?0.50:seedGap>=6?0.64:seedGap>=3?0.74:0.82;
     return{boost:Math.min(boost,maxBoost),flags};
   };
 
@@ -2563,8 +2572,12 @@ function NCAAOraclePage(){
       if(dog.data.opp_tov_rate>23){boost+=0.04;flags.push("💥 Elite turnover-forcing — 1 week of prep maximizes trap/press impact");}
       else if(dog.data.opp_tov_rate>20){boost+=0.02;flags.push("💥 Strong turnover-forcing defense");}
     }
-    // E8 cap — deepest round with largest seed gaps; nudge only, efficiency model leads
-    const maxBoost=seedGap>=8?0.22:seedGap>=5?0.30:seedGap>=3?0.40:seedGap>=2?0.50:0.58;
+    // E8 caps — overall 18% upset rate (LOWER than R64/R32/S16), BUT misleading:
+    // lower because most E8 games are close-seeded (1v4, 2v3 type) not because Cinderellas lose.
+    // For large-gap games (8/9/10/11 vs 1/2), the proven-3x Cinderella IS very competitive (~50%).
+    // "Final Four right there" pressure is the most well-documented mental trap in the tournament.
+    // Full week of prep = every tendency fully exploited. Large-gap cap matches S16 (proven 3 times).
+    const maxBoost=seedGap>=8?0.52:seedGap>=5?0.58:seedGap>=3?0.65:0.72;
     return{boost:Math.min(boost,maxBoost),flags};
   };
 
@@ -2666,8 +2679,14 @@ function NCAAOraclePage(){
       if(dog.data.opp_tov_rate>23){boost+=0.08;flags.push("💥 Elite turnover-forcing — near-2-week prep maximizes press/trap impact");}
       else if(dog.data.opp_tov_rate>20){boost+=0.04;flags.push("💥 Strong turnover-forcing defense");}
     }
-    // F4/CHAMP cap — most conservative; the remaining teams are all elite
-    const maxBoost=seedGap>=8?0.38:seedGap>=5?0.50:seedGap>=3?0.60:seedGap>=2?0.70:0.80;
+    // F4/CHAMP caps — the most important calibration: only 7-8% upset rate in F4, ~2-3% in CHAMP.
+    // THIS IS THE KEY DATA POINT: Cinderellas who reach F4 ALMOST ALWAYS LOSE there.
+    // Loyola 2018 (11) lost to 3-Michigan. UCLA 2021 (11) lost to 1-Gonzaga.
+    // NC State 2024 (11) lost to 1-Purdue. FAU 2023 (9) lost to 5-SDSU.
+    // Syracuse 2016 (10) lost to 1-UNC. The 1 and 2 seeds DOMINATE F4.
+    // Caps are dramatically lower than earlier rounds to match the actual 7% upset rate.
+    // Close matchups (gap<3) can still be competitive — those are often evenly-seeded matchups.
+    const maxBoost=seedGap>=8?0.18:seedGap>=5?0.30:seedGap>=3?0.45:0.58;
     return{boost:Math.min(boost,maxBoost),flags};
   };
 

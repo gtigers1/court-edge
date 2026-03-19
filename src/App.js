@@ -2225,60 +2225,60 @@ function NCAAOraclePage(){
     const favNet=(fav.data?.kenpom_rank)||(fav.teamObj?null:null);
     if(dogNet){
       const under=dogExpNet-dogNet;
-      if(under>60){boost+=0.13;flags.push("📊 Severely underseeded (NET)");}
-      else if(under>40){boost+=0.09;flags.push("📊 Underseeded by NET rank");}
-      else if(under>20){boost+=0.05;flags.push("📊 Better metrics than seed");}
-      else if(under>8){boost+=0.02;}
+      if(under>60){boost+=0.18;flags.push("📊 Severely underseeded (NET)");}
+      else if(under>40){boost+=0.13;flags.push("📊 Underseeded by NET rank");}
+      else if(under>20){boost+=0.07;flags.push("📊 Better metrics than seed");}
+      else if(under>8){boost+=0.03;}
     }
     // 2. Over-seeded favorite — weak team hiding behind big brand (Kentucky 2024)
     if(favNet){
       const over=favNet-favExpNet;
-      if(over>60){boost+=0.10;flags.push("⚠️ Favorite over-seeded by NET");}
-      else if(over>35){boost+=0.06;flags.push("⚠️ Favorite metrics below seed");}
-      else if(over>15){boost+=0.03;flags.push("⚠️ Fav slightly inflated");}
+      if(over>60){boost+=0.14;flags.push("⚠️ Favorite over-seeded by NET");}
+      else if(over>35){boost+=0.09;flags.push("⚠️ Favorite metrics below seed");}
+      else if(over>15){boost+=0.05;flags.push("⚠️ Fav slightly inflated");}
     }
     // 3. Underdog elite defense for their seed (Loyola 2018, JMU 2024, Saint Peter's 2022)
     if(dog.data?.opp&&dog.seed>=9){
       const bench={9:70,10:69,11:68,12:67,13:70,14:72,15:74,16:76}[dog.seed]||71;
       const elite=bench-dog.data.opp;
-      if(elite>8){boost+=0.09;flags.push("🛡 Elite D for seed (top-50 nationally)");}
-      else if(elite>5){boost+=0.05;flags.push("🛡 Strong defense vs seed");}
-      else if(elite>2){boost+=0.02;}
+      if(elite>8){boost+=0.13;flags.push("🛡 Elite D for seed (top-50 nationally)");}
+      else if(elite>5){boost+=0.07;flags.push("🛡 Strong defense vs seed");}
+      else if(elite>2){boost+=0.03;}
     }
     // 4. Vulnerable favorite defense (Ohio State 2021 AdjD #79, Arizona 2018 passive D)
     if(fav.data?.opp&&fav.seed<=7){
       const bench={1:60,2:62,3:63,4:65,5:67,6:68,7:69}[fav.seed]||66;
       const weak=fav.data.opp-bench;
-      if(weak>7){boost+=0.07;flags.push("🚨 Favorite has weak defense");}
-      else if(weak>4){boost+=0.04;flags.push("🚨 Favorite porous perimeter D");}
-      else if(weak>1.5){boost+=0.02;}
+      if(weak>7){boost+=0.11;flags.push("🚨 Favorite has weak defense");}
+      else if(weak>4){boost+=0.06;flags.push("🚨 Favorite porous perimeter D");}
+      else if(weak>1.5){boost+=0.03;}
     }
     // 5. Slow tempo — reduces possessions, increases single-game variance (Princeton, Yale)
     if(dog.data?.tempo){
-      if(dog.data.tempo<63){boost+=0.06;flags.push("🐢 Very slow pace (high variance)");}
-      else if(dog.data.tempo<66){boost+=0.04;flags.push("🐢 Deliberate pace");}
-      else if(dog.data.tempo<68){boost+=0.01;}
+      if(dog.data.tempo<63){boost+=0.09;flags.push("🐢 Very slow pace (high variance)");}
+      else if(dog.data.tempo<66){boost+=0.05;flags.push("🐢 Deliberate pace");}
+      else if(dog.data.tempo<68){boost+=0.02;}
     }
     // 6. Conference tournament momentum (all major Cinderellas entered on winning streaks)
-    if(dog.data?.conf_tourney_winner){boost+=0.05;flags.push("🏆 Conf. tourney winner — peak form");}
+    if(dog.data?.conf_tourney_winner){boost+=0.08;flags.push("🏆 Conf. tourney winner — peak form");}
     // 7. Strong mid-major underseeding patterns from 2015-2024 data
     const conf=dog.teamObj?.conf||"";
-    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.06;flags.push("💪 MVC — top mid-major, underseeded");}
-    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.04;flags.push("💪 A-10 underseeded by committee");}
-    else if(conf.includes("Ivy")){boost+=0.05;flags.push("🎓 Ivy — veteran roster, no early exits");}
-    else if(conf.includes("West Coast")||conf.includes("WCC")){boost+=0.03;flags.push("💪 WCC mid-major");}
-    else if(conf.includes("MAC")||conf.includes("CAA")||conf.includes("C-USA")||conf.includes("Conference USA")){boost+=0.03;flags.push("💪 Strong mid-major");}
-    else if(conf.includes("American")||conf.includes("Mountain West")){boost+=0.02;}
+    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.09;flags.push("💪 MVC — top mid-major, underseeded");}
+    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.06;flags.push("💪 A-10 underseeded by committee");}
+    else if(conf.includes("Ivy")){boost+=0.07;flags.push("🎓 Ivy — veteran roster, no early exits");}
+    else if(conf.includes("West Coast")||conf.includes("WCC")){boost+=0.05;flags.push("💪 WCC mid-major");}
+    else if(conf.includes("MAC")||conf.includes("CAA")||conf.includes("C-USA")||conf.includes("Conference USA")){boost+=0.05;flags.push("💪 Strong mid-major");}
+    else if(conf.includes("American")||conf.includes("Mountain West")){boost+=0.03;}
     // 8. High-scoring offense vs seed (Oral Roberts 2021: elite offense despite weak D)
-    if(dog.data?.ppg&&dog.seed>=11){
-      const offBench={11:73,12:72,13:70,14:68,15:66,16:64}[dog.seed]||70;
+    if(dog.data?.ppg&&dog.seed>=10){
+      const offBench={10:74,11:73,12:72,13:70,14:68,15:66,16:64}[dog.seed]||70;
       const offElite=dog.data.ppg-offBench;
-      if(offElite>7){boost+=0.05;flags.push("🔥 Elite offense for seed");}
-      else if(offElite>4){boost+=0.02;flags.push("🔥 Strong offense vs seed");}
+      if(offElite>7){boost+=0.08;flags.push("🔥 Elite offense for seed");}
+      else if(offElite>4){boost+=0.04;flags.push("🔥 Strong offense vs seed");}
     }
-    // Cap: large seed gaps should almost never flip. Boost nudges probability; rarely decides winner.
-    // A 12-seed starting at 35% + max boost → ~44% (⚡ watch). Only genuinely close by metrics → upset.
-    const maxBoost=seedGap>=10?0.14:seedGap>=7?0.20:seedGap>=5?0.30:seedGap>=3?0.42:0.52;
+    // Tiered caps: 5v12 stays tight; 6v11 / 7v10 / 8v9 reflect their historically high upset rates.
+    // 6v11 = 38% hist upset rate, 7v10 = 40%, 8v9 = ~47% — these should flip regularly with good factors.
+    const maxBoost=seedGap>=10?0.15:seedGap>=7?0.22:seedGap>=5?0.45:seedGap>=3?0.58:0.68;
     return{boost:Math.min(boost,maxBoost),flags};
   };
 

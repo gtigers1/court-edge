@@ -896,6 +896,87 @@ const NCAAM_TEAMS=[
   {name:"Lehigh Mountain Hawks",id:"2329",conf:"Patriot"},
 ].sort((a,b)=>a.name.localeCompare(b.name));
 
+// ── 2026 NCAA Tournament Bracket — all 68 teams pre-seeded ────────────────
+// Source: Official 2026 NCAA Bracket (ncaa.com/march-madness-live/bracket)
+// Keys: region → seed → team object (matched from NCAAM_TEAMS by ESPN ID)
+const INITIAL_BRACKET_2026=(()=>{
+  const T=id=>NCAAM_TEAMS.find(x=>x.id===id)||null;
+  return {
+    East:{
+      1:T("150"),   // Duke
+      2:T("41"),    // UConn
+      3:T("127"),   // Michigan State
+      4:T("2305"),  // Kansas
+      5:T("2599"),  // St. John's
+      6:T("97"),    // Louisville
+      7:T("26"),    // UCLA
+      8:T("194"),   // Ohio State
+      9:T("2628"),  // TCU
+      10:T("2116"), // UCF
+      11:T("58"),   // South Florida
+      12:T("2460"), // Northern Iowa
+      13:T("2856"), // Cal Baptist
+      14:T("2449"), // North Dakota State
+      15:T("231"),  // Furman
+      16:T("2561"), // Siena
+    },
+    West:{
+      1:T("12"),    // Arizona
+      2:T("2509"),  // Purdue
+      3:T("2250"),  // Gonzaga
+      4:T("8"),     // Arkansas
+      5:T("275"),   // Wisconsin
+      6:T("252"),   // BYU
+      7:T("2390"),  // Miami (FL)
+      8:T("222"),   // Villanova
+      9:T("328"),   // Utah State
+      10:T("142"),  // Missouri
+      11:T("251"),  // Texas
+      12:T("2272"), // High Point
+      13:T("62"),   // Hawaii
+      14:T("338"),  // Kennesaw State
+      15:T("2511"), // Queens
+      16:T("112358"),// LIU
+    },
+    South:{
+      1:T("57"),    // Florida
+      2:T("248"),   // Houston
+      3:T("356"),   // Illinois
+      4:T("158"),   // Nebraska
+      5:T("238"),   // Vanderbilt
+      6:T("153"),   // North Carolina
+      7:T("2608"),  // Saint Mary's
+      8:T("228"),   // Clemson
+      9:T("2294"),  // Iowa
+      10:T("245"),  // Texas A&M
+      11:T("2670"), // VCU
+      12:T("2377"), // McNeese
+      13:T("2653"), // Troy
+      14:T("219"),  // Penn
+      15:T("70"),   // Idaho
+      16:T("2504"), // Prairie View A&M
+    },
+    Midwest:{
+      1:T("130"),   // Michigan
+      2:T("66"),    // Iowa State
+      3:T("258"),   // Virginia
+      4:T("333"),   // Alabama
+      5:T("2641"),  // Texas Tech
+      6:T("2633"),  // Tennessee
+      7:T("96"),    // Kentucky
+      8:T("61"),    // Georgia
+      9:T("139"),   // Saint Louis
+      10:T("2541"), // Santa Clara
+      11:null,      // TBD (First Four)
+      12:T("2006"), // Akron
+      13:T("2275"), // Hofstra
+      14:T("2750"), // Wright State
+      15:T("2634"), // Tennessee State
+      16:T("47"),   // Howard
+    },
+  };
+})();
+
 // Seed-implied AdjEM prior: NCAA committee seeding reflects real team quality.
 // If API data produces AdjEM far below what the seed implies, blend with this prior
 // to prevent stale/hallucinated stats from making a #3 seed look weaker than an #11 seed.
@@ -1881,7 +1962,7 @@ function NCAATreePage(){
   const ac=C.amber;
   const REGIONS=["East","West","South","Midwest"];
   const [activeTab,setActiveTab]=useState("East");
-  const [sels,setSels]=useState(()=>{const t={};REGIONS.forEach(r=>{t[r]={};for(let s=1;s<=16;s++)t[r][s]=null;});return t;});
+  const [sels,setSels]=useState(()=>JSON.parse(JSON.stringify(INITIAL_BRACKET_2026)));
   const [store,setStore]=useState({});
   const [brackets,setBrackets]=useState({});
   const [loading,setLoading]=useState({});
@@ -2097,7 +2178,7 @@ function NCAAOraclePage(){
   // Column normalizers: each round's typical max seed-1 survival rate (for heat-map coloring)
   const ROUND_NORMS=[0.988,0.880,0.550,0.345,0.220,0.155];
   const [activeRegion,setActiveRegion]=useState("East");
-  const [sels,setSels]=useState(()=>{const t={};REGIONS.forEach(r=>{t[r]={};for(let s=1;s<=16;s++)t[r][s]=null;});return t;});
+  const [sels,setSels]=useState(()=>JSON.parse(JSON.stringify(INITIAL_BRACKET_2026)));
   const [simResults,setSimResults]=useState(null);
   const [simRunning,setSimRunning]=useState(false);
   const [viewMode,setViewMode]=useState("bracket");

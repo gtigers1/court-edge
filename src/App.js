@@ -866,26 +866,30 @@ const NCAAM_TEAMS=[
 function ncaamMdlEfficiency(h,a,neutral=true){
   // Adjusted efficiency per 100 possessions  -  what KenPom actually measures
   // Normalizing by tempo removes pace bias completely
-  const hOff=h.ppg/Math.max(h.tempo,55)*100;
-  const aDef=a.opp/Math.max(a.tempo,55)*100; // opp's pts ALLOWED per 100
-  const aOff=a.ppg/Math.max(a.tempo,55)*100;
-  const hDef=h.opp/Math.max(h.tempo,55)*100;
-  // Self-contained net efficiency: compare each team vs their own schedule
-  const hNet=(h.ppg-h.opp)/Math.max(h.tempo,55)*100;
-  const aNet=(a.ppg-a.opp)/Math.max(a.tempo,55)*100;
+  // Real tournament team AdjEM range: ~-15 (16-seed) to +35 (elite 1-seed).
+  // Cap raw values to prevent corrupted API data (hallucinated or stale ESPN scores)
+  // from producing impossible results like 97% for an 11-seed vs a 3-seed.
+  const rawHNet=(h.ppg-h.opp)/Math.max(h.tempo,55)*100;
+  const rawANet=(a.ppg-a.opp)/Math.max(a.tempo,55)*100;
+  const hNet=Math.max(-15,Math.min(35,rawHNet));
+  const aNet=Math.max(-15,Math.min(35,rawANet));
   // KenPom rank provides schedule-strength correction
-  const hRank=Math.min(h.kenpom_rank||150,350);
-  const aRank=Math.min(a.kenpom_rank||150,350);
-  const hRankAdj=(175-hRank)*0.03; // rank 1 = +5.2, rank 175 = 0, rank 350 = -5.25
+  // Cap rank at 330 (not 350) to limit rank-adjustment distortion from missing data
+  const hRank=Math.min(h.kenpom_rank||175,330);
+  const aRank=Math.min(a.kenpom_rank||175,330);
+  const hRankAdj=(175-hRank)*0.03; // rank 1 = +5.2, rank 175 = 0, rank 330 = -4.65
   const aRankAdj=(175-aRank)*0.03;
   const hInj=injPen(h.roster,0.10,0.05,0.015);
   const aInj=injPen(a.roster,0.10,0.05,0.015);
   // Tournament = neutral site (no HCA); regular season = +3.5 HCA
   const hca=neutral?0:3.5;
-  const diff=(hNet+hRankAdj)-(aNet+aRankAdj)+hca-(hInj-aInj)*22;
+  const rawDiff=(hNet+hRankAdj)-(aNet+aRankAdj)+hca-(hInj-aInj)*22;
+  // Cap total diff at ±22: prevents 97%+ results from data errors.
+  // Real #1 vs #16 top matchups reach ~93-94% — anything higher signals bad input data.
+  const diff=Math.max(-22,Math.min(22,rawDiff));
   // 0.116 calibrated to empirical NCAAM AdjEM win-probability curves: +10 AdjEM ≈ 58% win prob
   const p=logistic(diff*0.116);
-  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hEM:((hNet+hRankAdj)).toFixed(1),aEM:((aNet+aRankAdj)).toFixed(1),detail:`H AdjEM ${((hNet+hRankAdj)).toFixed(1)}  A AdjEM ${((aNet+aRankAdj)).toFixed(1)}`};}
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hEM:(hNet+hRankAdj).toFixed(1),aEM:(aNet+aRankAdj).toFixed(1),detail:`H AdjEM ${(hNet+hRankAdj).toFixed(1)} (raw ${rawHNet.toFixed(1)})  A AdjEM ${(aNet+aRankAdj).toFixed(1)} (raw ${rawANet.toFixed(1)})`};}
 
 function ncaamMdlPythagorean(h,a,neutral=true){
   // Win quality  -  Pythagorean win% for tournament single-game prediction

@@ -863,33 +863,50 @@ const NCAAM_TEAMS=[
   {name:"Lehigh Mountain Hawks",id:"2329",conf:"Patriot"},
 ].sort((a,b)=>a.name.localeCompare(b.name));
 
+// Seed-implied AdjEM prior: NCAA committee seeding reflects real team quality.
+// If API data produces AdjEM far below what the seed implies, blend with this prior
+// to prevent stale/hallucinated stats from making a #3 seed look weaker than an #11 seed.
+// Formula: seed 1 ≈ +22, seed 8 ≈ +10, seed 11 ≈ +6, seed 16 ≈ -2
+function seedImpliedEM(seed){return Math.round((17-Math.min(seed,16))*1.5+1);}
+
 function ncaamMdlEfficiency(h,a,neutral=true){
   // Adjusted efficiency per 100 possessions  -  what KenPom actually measures
   // Normalizing by tempo removes pace bias completely
   // Real tournament team AdjEM range: ~-15 (16-seed) to +35 (elite 1-seed).
-  // Cap raw values to prevent corrupted API data (hallucinated or stale ESPN scores)
-  // from producing impossible results like 97% for an 11-seed vs a 3-seed.
+  // Cap raw values to prevent corrupted API data from producing impossible results.
   const rawHNet=(h.ppg-h.opp)/Math.max(h.tempo,55)*100;
   const rawANet=(a.ppg-a.opp)/Math.max(a.tempo,55)*100;
-  const hNet=Math.max(-15,Math.min(35,rawHNet));
-  const aNet=Math.max(-15,Math.min(35,rawANet));
+  const hNetRaw=Math.max(-15,Math.min(35,rawHNet));
+  const aNetRaw=Math.max(-15,Math.min(35,rawANet));
   // KenPom rank provides schedule-strength correction
-  // Cap rank at 330 (not 350) to limit rank-adjustment distortion from missing data
   const hRank=Math.min(h.kenpom_rank||175,330);
   const aRank=Math.min(a.kenpom_rank||175,330);
   const hRankAdj=(175-hRank)*0.03; // rank 1 = +5.2, rank 175 = 0, rank 330 = -4.65
   const aRankAdj=(175-aRank)*0.03;
+  // Seed-prior blend: if computed AdjEM is below seed-implied floor, blend 50/50.
+  // This prevents a #3 Big Ten seed from showing AdjEM weaker than an #11 A-10 seed
+  // due to bad API data. Seeds 1-5 are most protected (committee rarely mis-seeds elite teams).
+  const hSeedEM=h.seed?seedImpliedEM(h.seed):null;
+  const aSeedEM=a.seed?seedImpliedEM(a.seed):null;
+  const hComputed=hNetRaw+hRankAdj;
+  const aComputed=aNetRaw+aRankAdj;
+  // Blend weight: 0 when computed ≥ seed floor, up to 0.5 when computed is well below floor
+  const blendW=(computed,floor)=>floor==null?0:computed>=floor?0:Math.min(0.5,(floor-computed)/floor*0.5);
+  const hBW=blendW(hComputed,hSeedEM);
+  const aBW=blendW(aComputed,aSeedEM);
+  const hEM=hBW>0?hComputed*(1-hBW)+hSeedEM*hBW:hComputed;
+  const aEM=aBW>0?aComputed*(1-aBW)+aSeedEM*aBW:aComputed;
   const hInj=injPen(h.roster,0.10,0.05,0.015);
   const aInj=injPen(a.roster,0.10,0.05,0.015);
   // Tournament = neutral site (no HCA); regular season = +3.5 HCA
   const hca=neutral?0:3.5;
-  const rawDiff=(hNet+hRankAdj)-(aNet+aRankAdj)+hca-(hInj-aInj)*22;
-  // Cap total diff at ±22: prevents 97%+ results from data errors.
-  // Real #1 vs #16 top matchups reach ~93-94% — anything higher signals bad input data.
+  const rawDiff=(hEM-aEM)+hca-(hInj-aInj)*22;
+  // Cap total diff at ±22 — real elite 1v16 matchups reach ~93-94%
   const diff=Math.max(-22,Math.min(22,rawDiff));
   // 0.116 calibrated to empirical NCAAM AdjEM win-probability curves: +10 AdjEM ≈ 58% win prob
   const p=logistic(diff*0.116);
-  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hEM:(hNet+hRankAdj).toFixed(1),aEM:(aNet+aRankAdj).toFixed(1),detail:`H AdjEM ${(hNet+hRankAdj).toFixed(1)} (raw ${rawHNet.toFixed(1)})  A AdjEM ${(aNet+aRankAdj).toFixed(1)} (raw ${rawANet.toFixed(1)})`};}
+  const seedNote=hBW>0?` [H blended w/ seed${h.seed} prior]`:aBW>0?` [A blended w/ seed${a.seed} prior]`:"";
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hEM:hEM.toFixed(1),aEM:aEM.toFixed(1),detail:`H AdjEM ${hEM.toFixed(1)} (raw ${rawHNet.toFixed(1)})  A AdjEM ${aEM.toFixed(1)} (raw ${rawANet.toFixed(1)})${seedNote}`};}
 
 function ncaamMdlPythagorean(h,a,neutral=true){
   // Win quality  -  Pythagorean win% for tournament single-game prediction
@@ -1202,8 +1219,8 @@ function NCAAMPage(){
         const delta=sos!=null?(sos-3)*0.7:((CONF_STRENGTH[conf]||6.0)-6.5)*4.0;
         return{...d,ppg:Math.max(55,d.ppg+delta*0.60),opp:Math.max(45,d.opp-delta*0.40),sos_rating:sos};
       };
-      const hNorm=confNorm({...homeData,conf:homeTeam?.conf},homeTeam?.conf,homeTeam?.name);
-      const aNorm=confNorm({...awayData,conf:awayTeam?.conf},awayTeam?.conf,awayTeam?.name);
+      const hNorm=confNorm({...homeData,conf:homeTeam?.conf,seed:parseInt(homeSeed)||8},homeTeam?.conf,homeTeam?.name);
+      const aNorm=confNorm({...awayData,conf:awayTeam?.conf,seed:parseInt(awaySeed)||8},awayTeam?.conf,awayTeam?.name);
       // Models using schedule-strength-normalized PPG/OPP
       const eff=ncaamMdlEfficiency(hNorm,aNorm,true);
       const pyth=ncaamMdlPythagorean(hNorm,aNorm,true);
@@ -1858,8 +1875,8 @@ function NCAATreePage(){
     };
     if(t1.data&&t2.data){
       const sd1=safeData(t1.data),sd2=safeData(t2.data);
-      const hNorm=confNormFn({...sd1,conf:t1.teamObj.conf},t1.teamObj.conf,t1.teamObj.name);
-      const aNorm=confNormFn({...sd2,conf:t2.teamObj.conf},t2.teamObj.conf,t2.teamObj.name);
+      const hNorm=confNormFn({...sd1,conf:t1.teamObj.conf,seed:t1.seed},t1.teamObj.conf,t1.teamObj.name);
+      const aNorm=confNormFn({...sd2,conf:t2.teamObj.conf,seed:t2.seed},t2.teamObj.conf,t2.teamObj.name);
       const eff=ncaamMdlEfficiency(hNorm,aNorm,true);const pyth=ncaamMdlPythagorean(hNorm,aNorm,true);
       const ff=ncaamMdlFourFactors(sd1,sd2,true);const tal=ncaamMdlTalent(sd1,sd2,true);
       const mc=ncaamMdlMonteCarlo(hNorm,aNorm,3000,true);

@@ -1006,25 +1006,27 @@ const CONF_STRENGTH={
 // Model 6: Conference Strength (schedule-context-adjusted net rating)
 // Receives conference-NORMALIZED PPG/OPP (already adjusted for schedule difficulty).
 // confBonus adds residual conference-quality premium: clutch experience, coaching depth, etc.
-// Using raw stats here caused MAAC teams (~+20 raw net) to outshine ACC teams (~+12 raw net).
+// Pure schedule-quality model — no PPG/OPP used at all.
+// The other 7 models already account for scoring; this model specifically answers:
+// "Who played the harder schedule, and whose conference tests teams more?"
+// PPG/OPP are intentionally excluded here because they are already SOS-adjusted by confNorm
+// (double-counting) and can be corrupted by bad API data, masking the schedule signal entirely.
 function ncaamMdlConferenceStrength(h,a){
   const hCS=CONF_STRENGTH[h.conf]||5.5;
   const aCS=CONF_STRENGTH[a.conf]||5.5;
-  // Conference tier bonus: coaching depth, tournament experience, pressure-game quality
-  const confBonus=(hCS-aCS)*0.55;
-  // Direct SOS comparison from TeamRankings data — primary anchor against raw stat inflation.
-  // Mid-majors (e.g. Kennesaw SOS=-1.8) can show inflated raw PPG from weak opponents;
-  // this signal correctly weights schedule quality vs. power conference teams (Gonzaga SOS=9.8).
-  const hSOS=h.sos_rating??null;
-  const aSOS=a.sos_rating??null;
-  const sosBonus=(hSOS!=null&&aSOS!=null)?(hSOS-aSOS)*0.50:0;
-  // Conference tournament winner: +0.8pt momentum boost (team is hot, peaked at right time)
+  // TeamRankings SOS (2025-26) is primary signal: harder schedule = more tested, more proven
+  const hSOS=h.sos_rating??hCS;  // fall back to conf tier when SOS not in table
+  const aSOS=a.sos_rating??aCS;
+  const sosDiff=hSOS-aSOS;
+  // Conference tier is secondary: even with equal SOS, Big Ten teams face more elite nights
+  const confDiff=hCS-aCS;
+  // Conference tournament winner: team peaked at right moment (+0.8 signal unit)
   const hCTW=h.conf_tourney_winner?0.8:0;
   const aCTW=a.conf_tourney_winner?0.8:0;
-  const hAdj=(h.ppg-h.opp)+confBonus+sosBonus+hCTW;
-  const aAdj=(a.ppg-a.opp)+aCTW;
-  const p=logistic((hAdj-aAdj)*0.10);
-  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hAdj:hAdj.toFixed(1),aAdj:aAdj.toFixed(1),hCS:hCS.toFixed(1),aCS:aCS.toFixed(1),detail:`H conf+SOS: ${hAdj.toFixed(1)}  A conf+SOS: ${aAdj.toFixed(1)}  (tiers ${hCS}/${aCS}, SOS ${hSOS?.toFixed(1)??'?'}/${aSOS?.toFixed(1)??'?'})`};}
+  // SOS = 60%, conf tier = 40% — no PPG/OPP involvement
+  const signal=sosDiff*0.60+confDiff*0.40+(hCTW-aCTW);
+  const p=logistic(signal*0.12);
+  return{homeProb:Math.min(0.97,Math.max(0.03,p)),hCS:hCS.toFixed(1),aCS:aCS.toFixed(1),hSOS:hSOS?.toFixed(1),aSOS:aSOS?.toFixed(1),detail:`H SOS ${hSOS?.toFixed(1)??'?'} conf ${hCS}  |  A SOS ${aSOS?.toFixed(1)??'?'} conf ${aCS}  |  signal ${signal.toFixed(2)}`};}
 
 // Model 7: Historical Seed Anchor (Bayesian prior from 40 years of tournament data)
 // R64 seed matchup historical rates are strong priors; shift toward KenPom when ranks disagree.

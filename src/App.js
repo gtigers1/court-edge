@@ -2571,6 +2571,109 @@ function NCAAOraclePage(){
     return{boost:Math.min(boost,maxBoost),flags};
   };
 
+  // ── 10-year Final Four upset pattern analysis (2015–2024) ────────────────────
+  // F4 upsets: the rarest events in college basketball. By F4, every team is elite —
+  // but Cinderellas carry peak momentum, zero pressure, and a nation rooting for them.
+  // Key patterns from 2015-2024 F4/Championship upsets:
+  //  1. Full Cinderella run (4 wins) — NC State 2024 (11), UCLA 2021 (11), Loyola 2018 (11),
+  //     Syracuse 2016 (10) — these teams have beaten 3+ favorites; playing completely loose
+  //  2. 8 UNC 2022 beat 2 Duke in F4 — massively underseeded (KenPom top-8 as 8-seed)
+  //  3. FAU 2023 (9-seed) reached F4 — underseeded mid-major with elite defense
+  //  4. SDSU 2023 (5-seed) reached championship — methodical grind-it-out system
+  //  5. South Carolina 2017 (7-seed) — Frank Martin elite D identity, veteran roster
+  //  6. Auburn 2019 (5-seed) — metrics far above seed, exploited soft favorites
+  //  7. Near-2-week prep time — maximum film study; systems and tendencies fully exposed
+  //  8. Mental pressure peaks: underdogs play loose; favorites feel everything on the line
+  //  9. Veteran-heavy undersized rosters OVERPERFORM vs blue-blood talent in F4
+  // 10. Defensive identity above all — no F4 upset team had worse-than-average defense
+  const calcF4UpsetBoost=(dog,fav)=>{
+    let boost=0;const flags=[];
+    const seedGap=dog.seed-fav.seed;
+    const dogExpNet=SEED_TO_NET_AVG[dog.seed]||(dog.seed*22);
+    const favExpNet=SEED_TO_NET_AVG[fav.seed]||(fav.seed*22);
+    const dogNet=dog.data?.kenpom_rank||null;
+    const favNet=fav.data?.kenpom_rank||null;
+    const dogRW=dog.roundsWon||0;
+    // 1. Full Cinderella run — 4 tournament wins, the nation's team, ZERO pressure
+    // NC State 2024 (11-seed, 4W), UCLA 2021 (11-seed, 4W), Loyola 2018 (11-seed, 4W)
+    // Syracuse 2016 (10-seed, 4W) — by F4 they're playing with pure joy and momentum
+    if(dogRW>=4&&dog.seed>=10){boost+=0.26;flags.push("🏃 PEAK Cinderella — 4 wins, the nation's team, playing pure basketball");}
+    else if(dogRW>=4&&dog.seed>=7){boost+=0.19;flags.push("🏃 Full Cinderella run — 4 wins, nothing to lose in F4");}
+    else if(dogRW>=3&&dog.seed>=6){boost+=0.11;flags.push("💫 Deep tournament run — 3 wins, momentum still building");}
+    // 2. Pure house money — opponent feels Final Four weight; underdog is the story of the tournament
+    if(dogRW>=4){boost+=0.10;flags.push("🎲 The tournament's Cinderella — maximum pressure on favorite, zero on underdog");}
+    else if(dogRW>=3&&dog.seed>=7){boost+=0.06;flags.push("🎲 Massive house money — already exceeded all expectations");}
+    // 3. NET/KenPom underseeding — F4 upsets almost always involve massively underseeded teams
+    // UNC 2022 was KenPom #7 as an 8-seed; Loyola 2018 was KenPom #19 as an 11-seed
+    if(dogNet){
+      const under=dogExpNet-dogNet;
+      if(under>95){boost+=0.23;flags.push("📊 Massively underseeded — elite by every metric; shouldn't be an underdog");}
+      else if(under>60){boost+=0.16;flags.push("📊 Underseeded by NET — 4 rounds of data confirm elite quality");}
+      else if(under>35){boost+=0.09;flags.push("📊 Better analytics than seed; F4 level quality regardless of seed");}
+      else if(under>18){boost+=0.03;}
+    }
+    // 4. Over-seeded favorite — 4 rounds of tournament data have now fully exposed them
+    if(favNet){
+      const over=favNet-favExpNet;
+      if(over>80){boost+=0.18;flags.push("⚠️ Favorite severely over-seeded — 4 rounds of data fully expose it");}
+      else if(over>50){boost+=0.12;flags.push("⚠️ Favorite metrics trail seed — exposed deepest in tournament");}
+      else if(over>25){boost+=0.05;flags.push("⚠️ Favorite slightly over-seeded");}
+    }
+    // 5. Elite defense identity — the #1 common trait of EVERY F4 upset team 2015-2024
+    // No F4 upset team had below-average defense for their seed; most were top-30 nationally
+    if(dog.data?.opp&&dog.seed>=5){
+      const bench={5:65,6:66,7:67,8:67,9:68,10:68,11:67,12:66,13:69,14:71}[dog.seed]||68;
+      const elite=bench-dog.data.opp;
+      if(elite>14){boost+=0.19;flags.push("🛡 Elite D identity — top-15 nationally; the bedrock of every F4 Cinderella");}
+      else if(elite>9){boost+=0.12;flags.push("🛡 Strong defensive program — proven through 4 tournament games");}
+      else if(elite>5){boost+=0.06;flags.push("🛡 Above-avg defense for seed");}
+      else if(elite>2){boost+=0.02;}
+    }
+    // 6. Vulnerable favorite defense — almost 2 weeks of film makes every weakness known
+    if(fav.data?.opp&&fav.seed<=3){
+      const bench={1:58,2:60,3:62}[fav.seed]||62;
+      const weak=fav.data.opp-bench;
+      if(weak>10){boost+=0.14;flags.push("🚨 Favorite weak D — nearly 2 weeks of film prep; every tendency exposed");}
+      else if(weak>6){boost+=0.08;flags.push("🚨 Favorite porous perimeter D — maximum scouting advantage");}
+      else if(weak>3){boost+=0.03;}
+    }
+    // 7. Unique defensive system — zone/pack-line with near-2-week prep still causes issues
+    // SDSU's grind-it-out style, Loyola's pack-line D, South Carolina's physical defense
+    if(dog.data?.opp&&dog.data?.tempo&&dog.data.tempo<66){
+      const benchD=70-(dog.seed*0.4);
+      const elite=benchD-dog.data.opp;
+      if(elite>8){boost+=0.13;flags.push("🔒 Unique system + slow tempo — even 2 weeks can't neutralize this style");}
+      else if(elite>4){boost+=0.07;flags.push("🔒 System + pace control — forces favorites onto uncomfortable ground");}
+    }
+    // 8. Tempo control — SDSU 2023 and Loyola 2018 both weaponized pace in F4
+    if(dog.data?.tempo){
+      if(dog.data.tempo<62){boost+=0.11;flags.push("🐢 Extreme pace control — limits possessions; F4 game plan built around it");}
+      else if(dog.data.tempo<65){boost+=0.06;flags.push("🐢 Deliberate system — slows game to a grind at F4 level");}
+      else if(dog.data.tempo<68){boost+=0.02;}
+    }
+    // 9. Conference tournament winner — 5+ game peak form entering F4 week
+    if(dog.data?.conf_tourney_winner){boost+=0.08;flags.push("🏆 Conf. tourney winner — 5+ game peak form; team is truly hot");}
+    // 10. Conference Cinderella pedigree in F4 context
+    const conf=dog.teamObj?.conf||"";
+    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.09;flags.push("💪 MVC — Loyola made F4 from this conference; elite mid-major program");}
+    else if(conf.includes("Ivy")){boost+=0.08;flags.push("🎓 Ivy in F4 — historically unprecedented; playing with zero fear");}
+    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.06;flags.push("💪 A-10 — battle-tested by physically demanding conference play");}
+    else if(conf.includes("Mountain West")||conf.includes("American")){boost+=0.05;flags.push("💪 Strong mid-major — SDSU 2023 pedigree");}
+    // 11. Elite eFG% — F4 Cinderellas often have an explosive scorer who elevates
+    if(dog.data?.efg_pct&&dog.seed>=5){
+      if(dog.data.efg_pct>0.560){boost+=0.09;flags.push("🔥 Elite eFG% — can explode offensively in any single F4 game");}
+      else if(dog.data.efg_pct>0.540){boost+=0.05;flags.push("🔥 Strong shooting efficiency vs seed level");}
+    }
+    // 12. Turnover-forcing D — near-2-week prep maximizes trap/press effectiveness
+    if(dog.data?.opp_tov_rate){
+      if(dog.data.opp_tov_rate>23){boost+=0.08;flags.push("💥 Elite turnover-forcing — near-2-week prep maximizes press/trap impact");}
+      else if(dog.data.opp_tov_rate>20){boost+=0.04;flags.push("💥 Strong turnover-forcing defense");}
+    }
+    // F4/CHAMP cap — most conservative; the remaining teams are all elite
+    const maxBoost=seedGap>=8?0.38:seedGap>=5?0.50:seedGap>=3?0.60:seedGap>=2?0.70:0.80;
+    return{boost:Math.min(boost,maxBoost),flags};
+  };
+
   // BT rating: seed (calibrated to 40yr history) + SOS + conf — no ESPN needed
   const btRating=(name,conf,seed)=>{
     const base=SEED_BT[Math.max(0,Math.min(15,(seed||8)-1))];
@@ -2617,11 +2720,11 @@ function NCAAOraclePage(){
     }
     let blended=Math.min(0.97,Math.max(0.03,modelP*(1-blendW)+histForT1*blendW));
     let upsetFlags=[];
-    // Apply 10-year upset pattern analysis for R64, R32, S16, and E8
-    if((round==="R64"||round==="R32"||round==="S16"||round==="E8")&&t1.seed!==t2.seed){
+    // Apply 10-year upset pattern analysis for all rounds
+    if((round==="R64"||round==="R32"||round==="S16"||round==="E8"||round==="F4"||round==="CHAMP")&&t1.seed!==t2.seed){
       const dog=t1.seed>t2.seed?t1:t2;
       const fav=t1.seed>t2.seed?t2:t1;
-      const {boost,flags}=round==="R64"?calcR64UpsetBoost(dog,fav):round==="R32"?calcR32UpsetBoost(dog,fav):round==="S16"?calcS16UpsetBoost(dog,fav):calcE8UpsetBoost(dog,fav);
+      const {boost,flags}=round==="R64"?calcR64UpsetBoost(dog,fav):round==="R32"?calcR32UpsetBoost(dog,fav):round==="S16"?calcS16UpsetBoost(dog,fav):round==="E8"?calcE8UpsetBoost(dog,fav):calcF4UpsetBoost(dog,fav);
       if(boost>0){
         // Apply boost in log-odds space so probability stays bounded
         const dogIsT1=t1.seed>t2.seed;
@@ -2673,9 +2776,9 @@ function NCAAOraclePage(){
 
   const getFinal4=()=>{
     const champs=REGIONS.map(r=>brackets[r]?.e8.w||{name:r+" TBD",seed:1,teamObj:null,data:null,roundsWon:4});
-    const f4=[[0,2],[1,3]].map(([i,j])=>{const t1=champs[i],t2=champs[j];const g=runGame(t1,t2,"F4");return{t1,t2,p:g.p,w:g.p>=0.5?t1:t2,dataMode:g.dataMode,histRate:g.histRate,round:"F4"};});
+    const f4=[[0,2],[1,3]].map(([i,j])=>{const t1=champs[i],t2=champs[j];const g=runGame(t1,t2,"F4");return{t1,t2,p:g.p,w:g.p>=0.5?t1:t2,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"F4",upsetFlags:g.upsetFlags||[]};});
     const gC=runGame(f4[0].w,f4[1].w,"CHAMP");
-    return{f4,champ:{t1:f4[0].w,t2:f4[1].w,p:gC.p,w:gC.p>=0.5?f4[0].w:f4[1].w,dataMode:gC.dataMode,round:"CHAMP"}};
+    return{f4,champ:{t1:f4[0].w,t2:f4[1].w,p:gC.p,w:gC.p>=0.5?f4[0].w:f4[1].w,dataMode:gC.dataMode,histRate:gC.histRate,dogSeed:gC.dogSeed,favSeed:gC.favSeed,round:"CHAMP",upsetFlags:gC.upsetFlags||[]}};
   };
 
   // Collect predicted upsets (model picks underdog to WIN) and close-game alerts
@@ -2711,7 +2814,7 @@ function NCAAOraclePage(){
     const upsetAlert=!isUpset&&dogProb>=0.36&&game.t1.seed!==game.t2.seed;
     const hRate=game.histRate||0;
     const flags=game.upsetFlags||[];
-    const hasFactors=flags.length>0&&(game.round==="R64"||game.round==="R32"||game.round==="S16"||game.round==="E8");
+    const hasFactors=flags.length>0&&(game.round==="R64"||game.round==="R32"||game.round==="S16"||game.round==="E8"||game.round==="F4"||game.round==="CHAMP");
     const borderCol=isUpset?"#f97316":upsetAlert?"#eab30888":hasFactors&&dogProb>0.30?"#94a3b855":C.border;
     const shortenName=(n)=>n.replace(" Blue Devils","").replace(" Wildcats","").replace(" Bulldogs","").replace(" Tigers","").replace(" Jayhawks","").replace(" Tar Heels","").replace(" Volunteers","").replace(" Gators","").replace(" Longhorns","").replace(" Trojans","").replace(" RedHawks","");
     const R=({team,prob,win})=>(

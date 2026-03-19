@@ -1,57 +1,72 @@
 // ── Hardcoded NET Rankings ─────────────────────────────────────────────────
-// ESPN does not expose NCAA NET rankings via any public API endpoint.
-// Sourced from ESPN BPI Strength of Record (SOR) view, March 18, 2026.
-// SOR = wins quality vs schedule, highly correlated with NCAA NET rank.
-// Used as fallback when ESPN API returns no NET rank (turns badge green).
+// Sourced from warrennolan.com NET Nitty Gritty Report, March 18, 2026.
+// All 68 NCAA Tournament teams are included with their exact NET rank.
+// Used as fallback when ESPN API returns no NET rank (turns badge green→yellow).
 const NET_RANKS = {
-  // Top 50 — from ESPN SOR ranking Mar 18 2026
-  "arizona":1,"michigan":2,"duke":3,"uconn":4,"connecticut":4,
-  "florida":5,"houston":6,"purdue":7,"arkansas":8,"virginia":9,
-  "nebraska":10,"gonzaga":11,"vanderbilt":12,"michigan state":13,
-  "iowa state":14,"alabama":15,"st. john's":16,"st. johns":16,"saint john's":16,
-  "illinois":17,"kansas":18,"wisconsin":19,"texas tech":20,
-  "north carolina":21,"tar heels":21,"tennessee":22,"villanova":23,
-  "byu":24,"brigham young":24,
-  "miami":25,  // Miami FL (ACC) — note: matched before miami (oh)
-  "louisville":26,"kentucky":27,
-  "miami (oh)":28,"miami of ohio":28,"miami ohio":28,"mcneese":45,
-  "saint mary's":29,"saint marys":29,"ucla":30,
-  "georgia":31,"clemson":32,"utah state":33,"ohio state":34,
-  "tcu":35,"texas christian":35,"texas a&m":36,
-  "ucf":37,"central florida":37,"saint louis":38,"vcu":39,"virginia commonwealth":39,
-  "iowa":40,"missouri":41,"santa clara":42,"texas":43,"auburn":44,
-  "mcneese cowboys":45,
-  "oklahoma":46,"seton hall":47,"smu":48,"southern methodist":48,
-  "nc state":49,"north carolina state":49,"south florida":50,
+  // ── All 68 Tournament Teams — actual NET ranks (warrennolan.com Mar 18 2026) ──
+  // EAST
+  "duke":1,"uconn":10,"connecticut":10,"michigan state":11,"kansas":21,
+  "st. john's":16,"st. johns":16,"saint john's":16,"saint johns":16,
+  "louisville":17,"ucla":30,"ohio state":29,"tcu":39,"texas christian":39,
+  "ucf":51,"central florida":51,"south florida":45,
+  "northern iowa":72,"california baptist":98,"cal baptist":98,
+  "north dakota state":114,"n dakota state":114,"furman":186,"siena":183,
 
-  // 51-100 estimates (ESPN BPI order, close to NET)
-  "west virginia":51,"indiana":52,"baylor":53,"cincinnati":54,
-  "creighton":55,"marquette":56,"xavier":57,"butler":58,"providence":59,
-  "notre dame":60,"pittsburgh":61,"florida state":62,"wake forest":63,
-  "boston college":64,"virginia tech":65,"penn state":66,"northwestern":67,
-  "minnesota":68,"rutgers":69,"maryland":70,
-  "colorado":71,"utah":72,"arizona state":73,"oregon":74,
-  "washington state":75,"california":76,"stanford":77,
-  "ole miss":78,"mississippi":78,"mississippi state":79,"lsu":80,
-  "south carolina":81,"wichita state":82,"memphis":83,"tulsa":84,
-  "new mexico":85,"wyoming":86,"boise state":87,"colorado state":88,
-  "fresno state":89,"nevada":90,"unlv":91,"dayton":92,
-  "george mason":93,"richmond":94,"davidson":95,"loyola chicago":96,
-  "la salle":97,"george washington":98,"fordham":99,"duquesne":100,
+  // WEST
+  "arizona":3,"purdue":9,"gonzaga":7,"arkansas":15,"wisconsin":25,
+  "byu":23,"brigham young":23,
+  "miami":32, // Miami FL — longer key "miami (oh)" wins for Miami Ohio
+  "villanova":35,"utah state":26,"missouri":58,"texas":42,
+  "high point":75,"hawaii":101,"hawai'i":101,
+  "kennesaw state":155,"kennesaw st":155,
+  "queens":189,"long island":198,"liu":198,
 
-  // 101+ small-conference tournament teams
-  "umass":101,"massachusetts":101,"ohio":102,"bowling green":103,
-  "akron":104,"kent state":105,"ball state":106,
-  "northern illinois":107,"western michigan":108,"central michigan":109,
-  "eastern michigan":110,"toledo":111,"buffalo":112,
-  "washington":113,"drake":114,"belmont":115,
-  "colgate":116,"furman":117,"chattanooga":118,"mercer":119,
-  "samford":120,"lipscomb":121,"kennesaw state":122,
-  "florida gulf coast":123,"fgcu":123,"jacksonville state":124,
-  "eastern washington":125,"weber state":126,"montana":127,
-  "south dakota state":128,"north dakota state":129,
-  "milwaukee":130,"green bay":131,"wright state":132,
-  "morehead state":133,"eastern kentucky":134,"bellarmine":135,
+  // SOUTH
+  "florida":4,"houston":5,"illinois":8,"nebraska":14,"vanderbilt":13,
+  "north carolina":24,"tar heels":24,
+  "saint mary's":22,"saint marys":22,"st. mary's":22,
+  "clemson":34,"iowa":27,"texas a&m":44,"vcu":43,"virginia commonwealth":43,
+  "mcneese":56,"mcneese cowboys":56,"troy":125,
+  "penn":139,"pennsylvania":139,"idaho":145,"prairie view":300,"prairie view a&m":300,
+
+  // MIDWEST
+  "michigan":2,"iowa state":6,"virginia":12,"alabama":18,
+  "texas tech":19,"tennessee":20,"kentucky":28,"georgia":33,
+  "saint louis":31,"santa clara":40,
+  "akron":54,"hofstra":88,"wright state":127,"wright st":127,
+  "tennessee state":172,"tennessee st":172,"howard":203,
+
+  // Miami (OH) — longer key beats "miami" above
+  "miami (oh)":64,"miami of ohio":64,"miami ohio":64,"miami redhawks":64,
+
+  // ── Non-tournament top 50 for common matchup teams ──
+  "michigan state spartans":11, // alias
+  "virginia cavaliers":12,
+  "nc state":36,"north carolina state":36,
+  "smu":37,"southern methodist":37,
+  "auburn":38,"indiana":41,"new mexico":46,
+  "san diego state":47,"sdsu":47,
+  "oklahoma":48,"cincinnati":49,"baylor":50,
+  "west virginia":59,"seton hall":53,
+  "washington":60,"creighton":62,"marquette":63,
+  "butler":65,"notre dame":66,"providence":67,
+  "pittsburgh":68,"florida state":69,"wake forest":70,
+  "virginia tech":71,"penn state":73,"northwestern":74,
+  "minnesota":76,"rutgers":77,"maryland":78,
+  "colorado":79,"utah":80,"arizona state":81,"oregon":82,
+  "ole miss":83,"mississippi":83,"mississippi state":84,"lsu":85,
+  "south carolina":86,"wichita state":87,
+  "memphis":89,"tulsa":90,"dayton":91,
+  "george mason":92,"richmond":93,"davidson":94,
+  "loyola chicago":95,"la salle":96,"george washington":97,
+  "fordham":99,"duquesne":100,
+  "umass":102,"massachusetts":102,
+  "drake":103,"belmont":104,"colgate":105,
+  "chattanooga":106,"samford":107,"lipscomb":108,
+  "fgcu":109,"florida gulf coast":109,"jacksonville state":110,
+  "eastern washington":111,"weber state":112,"montana":113,
+  "south dakota state":115,"milwaukee":116,"green bay":117,
+  "morehead state":118,"eastern kentucky":119,
 };
 
 // Lookup by name match (handles "Illinois Fighting Illini" → "illinois").

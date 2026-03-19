@@ -1,52 +1,75 @@
 // ── Hardcoded NET Rankings ─────────────────────────────────────────────────
 // ESPN does not expose NCAA NET rankings via any public API endpoint.
-// These are sourced from ESPN BPI (March 18, 2026) which correlates closely with NET.
-// Used as fallback when ESPN API returns no NET rank, turning the badge from red→green.
+// Sourced from ESPN BPI Strength of Record (SOR) view, March 18, 2026.
+// SOR = wins quality vs schedule, highly correlated with NCAA NET rank.
+// Used as fallback when ESPN API returns no NET rank (turns badge green).
 const NET_RANKS = {
-  "duke":1,"michigan":2,"arizona":3,"houston":4,"florida":5,
-  "iowa state":6,"illinois":7,"gonzaga":8,"purdue":9,"uconn":10,
-  "connecticut":10,"louisville":11,"tennessee":12,"michigan state":13,
-  "vanderbilt":14,"alabama":15,"st. john's":16,"st. johns":16,
-  "saint john's":16,"arkansas":17,"nebraska":18,"byu":18,"brigham young":19,
-  "virginia":20,"texas tech":21,"kansas":22,"kentucky":23,"wisconsin":24,
-  "ucla":25,"ohio state":26,"saint mary's":27,"saint marys":27,
-  "clemson":28,"auburn":29,"north carolina":30,"tar heels":30,
-  "iowa":31,"texas a&m":32,"georgia":33,"utah state":34,"saint louis":35,
-  "villanova":36,"texas":37,"indiana":38,"nc state":39,"north carolina state":39,
-  "miami":40,"oklahoma":41,"smu":42,"southern methodist":42,
-  "cincinnati":43,"missouri":44,"baylor":45,"vcu":46,"virginia commonwealth":46,
-  "west virginia":47,"tcu":48,"texas christian":48,
-  "santa clara":49,"washington":50,
-  // Additional common tournament teams
-  "creighton":51,"marquette":52,"xavier":53,"butler":54,"providence":55,
-  "seton hall":56,"depaul":57,"georgetown":58,"notre dame":59,"pittsburgh":60,
-  "florida state":61,"wake forest":62,"boston college":63,"virginia tech":64,
-  "penn state":65,"northwestern":66,"minnesota":67,"rutgers":68,
-  "maryland":69,"colorado":70,"utah":71,"arizona state":72,"oregon":73,
-  "washington state":74,"california":75,"stanford":76,
-  "ole miss":77,"mississippi state":78,"lsu":79,"south carolina":80,
-  "mississippi":77,"florida gators":5,
-  "wichita state":81,"memphis":82,"tulsa":83,"east carolina":84,
-  "ucf":85,"central florida":85,"south florida":86,
-  "new mexico":87,"wyoming":88,"boise state":89,"colorado state":90,
-  "fresno state":91,"nevada":92,"unlv":93,"air force":94,"san jose state":95,
-  "dayton":96,"george mason":97,"richmond":98,"davidson":99,
-  "loyola chicago":100,"la salle":101,"george washington":102,
-  "fordham":103,"duquesne":104,"umass":105,"massachusetts":105,
-  "ohio":106,"bowling green":107,"akron":108,"kent state":109,
-  "ball state":110,"miami ohio":111,"miami (oh)":111,"miami of ohio":111,
-  "northern illinois":112,"western michigan":113,"central michigan":114,
-  "eastern michigan":115,"toledo":116,"buffalo":117,
-  "gonzaga bulldogs":8,"kentucky wildcats":23,"duke blue devils":1,
+  // Top 50 — from ESPN SOR ranking Mar 18 2026
+  "arizona":1,"michigan":2,"duke":3,"uconn":4,"connecticut":4,
+  "florida":5,"houston":6,"purdue":7,"arkansas":8,"virginia":9,
+  "nebraska":10,"gonzaga":11,"vanderbilt":12,"michigan state":13,
+  "iowa state":14,"alabama":15,"st. john's":16,"st. johns":16,"saint john's":16,
+  "illinois":17,"kansas":18,"wisconsin":19,"texas tech":20,
+  "north carolina":21,"tar heels":21,"tennessee":22,"villanova":23,
+  "byu":24,"brigham young":24,
+  "miami":25,  // Miami FL (ACC) — note: matched before miami (oh)
+  "louisville":26,"kentucky":27,
+  "miami (oh)":28,"miami of ohio":28,"miami ohio":28,"mcneese":45,
+  "saint mary's":29,"saint marys":29,"ucla":30,
+  "georgia":31,"clemson":32,"utah state":33,"ohio state":34,
+  "tcu":35,"texas christian":35,"texas a&m":36,
+  "ucf":37,"central florida":37,"saint louis":38,"vcu":39,"virginia commonwealth":39,
+  "iowa":40,"missouri":41,"santa clara":42,"texas":43,"auburn":44,
+  "mcneese cowboys":45,
+  "oklahoma":46,"seton hall":47,"smu":48,"southern methodist":48,
+  "nc state":49,"north carolina state":49,"south florida":50,
+
+  // 51-100 estimates (ESPN BPI order, close to NET)
+  "west virginia":51,"indiana":52,"baylor":53,"cincinnati":54,
+  "creighton":55,"marquette":56,"xavier":57,"butler":58,"providence":59,
+  "notre dame":60,"pittsburgh":61,"florida state":62,"wake forest":63,
+  "boston college":64,"virginia tech":65,"penn state":66,"northwestern":67,
+  "minnesota":68,"rutgers":69,"maryland":70,
+  "colorado":71,"utah":72,"arizona state":73,"oregon":74,
+  "washington state":75,"california":76,"stanford":77,
+  "ole miss":78,"mississippi":78,"mississippi state":79,"lsu":80,
+  "south carolina":81,"wichita state":82,"memphis":83,"tulsa":84,
+  "new mexico":85,"wyoming":86,"boise state":87,"colorado state":88,
+  "fresno state":89,"nevada":90,"unlv":91,"dayton":92,
+  "george mason":93,"richmond":94,"davidson":95,"loyola chicago":96,
+  "la salle":97,"george washington":98,"fordham":99,"duquesne":100,
+
+  // 101+ small-conference tournament teams
+  "umass":101,"massachusetts":101,"ohio":102,"bowling green":103,
+  "akron":104,"kent state":105,"ball state":106,
+  "northern illinois":107,"western michigan":108,"central michigan":109,
+  "eastern michigan":110,"toledo":111,"buffalo":112,
+  "washington":113,"drake":114,"belmont":115,
+  "colgate":116,"furman":117,"chattanooga":118,"mercer":119,
+  "samford":120,"lipscomb":121,"kennesaw state":122,
+  "florida gulf coast":123,"fgcu":123,"jacksonville state":124,
+  "eastern washington":125,"weber state":126,"montana":127,
+  "south dakota state":128,"north dakota state":129,
+  "milwaukee":130,"green bay":131,"wright state":132,
+  "morehead state":133,"eastern kentucky":134,"bellarmine":135,
 };
 
-// Lookup by partial name match (handles "Illinois Fighting Illini" → "illinois")
+// Lookup by name match (handles "Illinois Fighting Illini" → "illinois").
+// Uses exact-first, then longer-key-first partial match to avoid "miami" swallowing "miami (oh)".
 function lookupNetRank(teamName) {
   if (!teamName) return null;
   const lower = teamName.toLowerCase().trim();
+  // 1. Exact match
   if (NET_RANKS[lower] != null) return NET_RANKS[lower];
+  // 2. Key contained in team name — prefer longest key (most specific)
+  let best = null, bestLen = 0;
   for (const [key, rank] of Object.entries(NET_RANKS)) {
-    if (lower.includes(key) || key.includes(lower)) return rank;
+    if (lower.includes(key) && key.length > bestLen) { best = rank; bestLen = key.length; }
+  }
+  if (best != null) return best;
+  // 3. Team name contained in key
+  for (const [key, rank] of Object.entries(NET_RANKS)) {
+    if (key.includes(lower)) return rank;
   }
   return null;
 }

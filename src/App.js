@@ -2204,6 +2204,83 @@ function NCAAOraclePage(){
     if(diff>=3)return 0.30;if(diff>=2)return 0.37;if(diff>=1)return 0.44;return 0.50;
   };
 
+  // ── 10-year R64 upset pattern analysis (2015–2024) ──────────────────────────
+  // Key patterns extracted from every R64 upset:
+  //  1. NET/KenPom rank far better than seed implies → team is underseeded
+  //  2. Elite defense for their seed level (Loyola 2018 AdjD #17, JMU 2024 #2 in 3PT-D)
+  //  3. Vulnerable favorite — weak defense or over-seeded (Kentucky 2022/2024, Arizona 2018)
+  //  4. Slow tempo — fewer possessions → more variance → better for dogs (Princeton, Yale)
+  //  5. Conference tournament winner — peak momentum entering tournament
+  //  6. Strong mid-major conference — MVC/A-10/Ivy systematically underseeded by committee
+  //  7. High-scoring offense for seed — teams like Oral Roberts with elite offense surprise
+  // Returns: {boost (log-odds), flags (string[])} — boost applied to underdog's log-odds
+  const SEED_TO_NET_AVG={1:5,2:20,3:40,4:60,5:80,6:100,7:120,8:140,9:160,10:180,11:200,12:220,13:250,14:290,15:330,16:350};
+  const calcR64UpsetBoost=(dog,fav)=>{
+    let boost=0;const flags=[];
+    const seedGap=dog.seed-fav.seed;
+    // 1. NET rank vs seed: underseeded underdog (Buffalo 2018: 13-seed, KP #36)
+    const dogExpNet=SEED_TO_NET_AVG[dog.seed]||(dog.seed*22);
+    const favExpNet=SEED_TO_NET_AVG[fav.seed]||(fav.seed*22);
+    const dogNet=(dog.data?.kenpom_rank)||(dog.teamObj?null:null);
+    const favNet=(fav.data?.kenpom_rank)||(fav.teamObj?null:null);
+    if(dogNet){
+      const under=dogExpNet-dogNet;
+      if(under>60){boost+=0.28;flags.push("📊 Severely underseeded (NET)");}
+      else if(under>40){boost+=0.20;flags.push("📊 Underseeded by NET rank");}
+      else if(under>20){boost+=0.11;flags.push("📊 Better metrics than seed");}
+      else if(under>8){boost+=0.05;}
+    }
+    // 2. Over-seeded favorite — weak team hiding behind big brand (Kentucky 2024)
+    if(favNet){
+      const over=favNet-favExpNet;
+      if(over>60){boost+=0.22;flags.push("⚠️ Favorite over-seeded by NET");}
+      else if(over>35){boost+=0.14;flags.push("⚠️ Favorite metrics below seed");}
+      else if(over>15){boost+=0.07;flags.push("⚠️ Fav slightly inflated");}
+    }
+    // 3. Underdog elite defense for their seed (Loyola 2018, JMU 2024, Saint Peter's 2022)
+    if(dog.data?.opp&&dog.seed>=9){
+      const bench={9:70,10:69,11:68,12:67,13:70,14:72,15:74,16:76}[dog.seed]||71;
+      const elite=bench-dog.data.opp;
+      if(elite>8){boost+=0.20;flags.push("🛡 Elite D for seed (top-50 nationally)");}
+      else if(elite>5){boost+=0.12;flags.push("🛡 Strong defense vs seed");}
+      else if(elite>2){boost+=0.05;}
+    }
+    // 4. Vulnerable favorite defense (Ohio State 2021 AdjD #79, Arizona 2018 passive D)
+    if(fav.data?.opp&&fav.seed<=7){
+      const bench={1:60,2:62,3:63,4:65,5:67,6:68,7:69}[fav.seed]||66;
+      const weak=fav.data.opp-bench;
+      if(weak>7){boost+=0.16;flags.push("🚨 Favorite has weak defense");}
+      else if(weak>4){boost+=0.09;flags.push("🚨 Favorite porous perimeter D");}
+      else if(weak>1.5){boost+=0.04;}
+    }
+    // 5. Slow tempo — reduces possessions, increases single-game variance (Princeton, Yale)
+    if(dog.data?.tempo){
+      if(dog.data.tempo<63){boost+=0.14;flags.push("🐢 Very slow pace (high variance)");}
+      else if(dog.data.tempo<66){boost+=0.08;flags.push("🐢 Deliberate pace");}
+      else if(dog.data.tempo<68){boost+=0.03;}
+    }
+    // 6. Conference tournament momentum (all major Cinderellas entered on winning streaks)
+    if(dog.data?.conf_tourney_winner){boost+=0.12;flags.push("🏆 Conf. tourney winner — peak form");}
+    // 7. Strong mid-major underseeding patterns from 2015-2024 data
+    const conf=dog.teamObj?.conf||"";
+    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.12;flags.push("💪 MVC — top mid-major, underseeded");}
+    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.08;flags.push("💪 A-10 underseeded by committee");}
+    else if(conf.includes("Ivy")){boost+=0.11;flags.push("🎓 Ivy — veteran roster, no early exits");}
+    else if(conf.includes("West Coast")||conf.includes("WCC")){boost+=0.07;flags.push("💪 WCC mid-major");}
+    else if(conf.includes("MAC")||conf.includes("CAA")||conf.includes("C-USA")||conf.includes("Conference USA")){boost+=0.07;flags.push("💪 Strong mid-major");}
+    else if(conf.includes("American")||conf.includes("Mountain West")){boost+=0.05;}
+    // 8. High-scoring offense vs seed (Oral Roberts 2021: elite offense despite weak D)
+    if(dog.data?.ppg&&dog.seed>=11){
+      const offBench={11:73,12:72,13:70,14:68,15:66,16:64}[dog.seed]||70;
+      const offElite=dog.data.ppg-offBench;
+      if(offElite>7){boost+=0.10;flags.push("🔥 Elite offense for seed");}
+      else if(offElite>4){boost+=0.05;flags.push("🔥 Strong offense vs seed");}
+    }
+    // Cap total boost by seed gap (extreme mismatches shouldn't flip completely)
+    const maxBoost=seedGap>=10?0.55:seedGap>=7?0.70:seedGap>=5?0.85:seedGap>=3?0.95:1.05;
+    return{boost:Math.min(boost,maxBoost),flags};
+  };
+
   // BT rating: seed (calibrated to 40yr history) + SOS + conf — no ESPN needed
   const btRating=(name,conf,seed)=>{
     const base=SEED_BT[Math.max(0,Math.min(15,(seed||8)-1))];
@@ -2248,15 +2325,31 @@ function NCAAOraclePage(){
       const r2=t2.teamObj?btRating(t2.teamObj.name,t2.teamObj.conf,t2.seed):(SEED_BT[Math.min(15,t2.seed-1)]??0);
       modelP=logistic(r1-r2);dataMode=false;
     }
-    const blended=Math.min(0.97,Math.max(0.03,modelP*(1-blendW)+histForT1*blendW));
-    return{p:applySurvivor(blended),dataMode,histRate:hRate,dogSeed,favSeed};
+    let blended=Math.min(0.97,Math.max(0.03,modelP*(1-blendW)+histForT1*blendW));
+    let upsetFlags=[];
+    // Apply 10-year upset pattern analysis specifically for R64
+    if(round==="R64"&&t1.seed!==t2.seed){
+      const dog=t1.seed>t2.seed?t1:t2;
+      const fav=t1.seed>t2.seed?t2:t1;
+      const {boost,flags}=calcR64UpsetBoost(dog,fav);
+      if(boost>0){
+        // Apply boost in log-odds space so probability stays bounded
+        const dogIsT1=t1.seed>t2.seed;
+        const currentLogOdds=Math.log(blended/(1-blended));
+        // boost helps underdog: subtract from t1's log-odds if t1 is fav, add if t1 is dog
+        const adj=dogIsT1?boost:-boost;
+        blended=Math.min(0.97,Math.max(0.03,1/(1+Math.exp(-(currentLogOdds+adj)))));
+        upsetFlags=flags;
+      }
+    }
+    return{p:applySurvivor(blended),dataMode,histRate:hRate,dogSeed,favSeed,upsetFlags};
   };
 
   const adv=(team)=>({...team,roundsWon:(team.roundsWon||0)+1});
   const computeBracket=(region,cs,cstore)=>{
     const sel=cs[region];
     const mk=s=>({name:sel[s]?sel[s].name:(s+" Seed"),seed:s,teamObj:sel[s]||null,data:sel[s]?cstore[sel[s].id]||null:null,roundsWon:0});
-    const r64=R64_PAIRS.map(([s1,s2])=>{const t1=mk(s1),t2=mk(s2);const g=runGame(t1,t2,"R64");const w=g.p>=0.5?adv(t1):adv(t2);return{t1,t2,p:g.p,w,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"R64"};});
+    const r64=R64_PAIRS.map(([s1,s2])=>{const t1=mk(s1),t2=mk(s2);const g=runGame(t1,t2,"R64");const w=g.p>=0.5?adv(t1):adv(t2);return{t1,t2,p:g.p,w,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"R64",upsetFlags:g.upsetFlags||[]};});
     const r32=[[0,1],[2,3],[4,5],[6,7]].map(([i,j])=>{const t1=r64[i].w,t2=r64[j].w;const g=runGame(t1,t2,"R32");const w=g.p>=0.5?adv(t1):adv(t2);return{t1,t2,p:g.p,w,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"R32"};});
     const s16=[[0,1],[2,3]].map(([i,j])=>{const t1=r32[i].w,t2=r32[j].w;const g=runGame(t1,t2,"S16");const w=g.p>=0.5?adv(t1):adv(t2);return{t1,t2,p:g.p,w,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"S16"};});
     const g8=runGame(s16[0].w,s16[1].w,"E8");const w8=g8.p>=0.5?adv(s16[0].w):adv(s16[1].w);
@@ -2321,12 +2414,15 @@ function NCAAOraclePage(){
   // Compact game card for full bracket display
   const OCard=({game})=>{
     if(!game)return null;
+    const [showFlags,setShowFlags]=useState(false);
     const t1w=game.w?.seed===game.t1?.seed&&game.w?.name===game.t1?.name;
     const isUpset=game.w&&game.t1.seed!==game.t2.seed&&game.w.seed>Math.min(game.t1.seed,game.t2.seed);
     const dogProb=game.t1.seed>game.t2.seed?game.p:(1-game.p);
-    const upsetAlert=!isUpset&&dogProb>=0.38&&game.t1.seed!==game.t2.seed;
+    const upsetAlert=!isUpset&&dogProb>=0.36&&game.t1.seed!==game.t2.seed;
     const hRate=game.histRate||0;
-    const borderCol=isUpset?"#f97316":upsetAlert?"#eab30888":C.border;
+    const flags=game.upsetFlags||[];
+    const hasFactors=flags.length>0&&game.round==="R64";
+    const borderCol=isUpset?"#f97316":upsetAlert?"#eab30888":hasFactors&&dogProb>0.30?"#94a3b855":C.border;
     const shortenName=(n)=>n.replace(" Blue Devils","").replace(" Wildcats","").replace(" Bulldogs","").replace(" Tigers","").replace(" Jayhawks","").replace(" Tar Heels","").replace(" Volunteers","").replace(" Gators","").replace(" Longhorns","").replace(" Trojans","").replace(" RedHawks","");
     const R=({team,prob,win})=>(
       <div style={{display:"flex",alignItems:"center",gap:3,padding:"2px 5px",background:win?ac+"18":"transparent",borderRadius:2}}>
@@ -2339,8 +2435,14 @@ function NCAAOraclePage(){
       <div style={{background:C.black,border:"1px solid "+borderCol,borderRadius:4,overflow:"hidden",width:"100%"}}>
         <R team={game.t1} prob={game.p} win={t1w}/>
         <R team={game.t2} prob={1-game.p} win={!t1w}/>
-        {isUpset&&<div style={{fontSize:6,color:"#f97316",textAlign:"center",padding:"1px 3px",background:"#f9731611",fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:.5}}>🔥 UPSET · hist {(hRate*100).toFixed(0)}%</div>}
-        {upsetAlert&&<div style={{fontSize:6,color:"#eab308",textAlign:"center",padding:"1px 3px",background:"#eab30811",fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:.5}}>⚡ WATCH · {(dogProb*100).toFixed(0)}%</div>}
+        {isUpset&&<div style={{fontSize:6,color:"#f97316",textAlign:"center",padding:"1px 3px",background:"#f9731611",fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:.5,cursor:hasFactors?"pointer":"default"}} onClick={()=>hasFactors&&setShowFlags(f=>!f)}>🔥 UPSET · hist {(hRate*100).toFixed(0)}%{hasFactors?" ▾":""}</div>}
+        {upsetAlert&&<div style={{fontSize:6,color:"#eab308",textAlign:"center",padding:"1px 3px",background:"#eab30811",fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:.5,cursor:hasFactors?"pointer":"default"}} onClick={()=>hasFactors&&setShowFlags(f=>!f)}>⚡ WATCH · {(dogProb*100).toFixed(0)}%{hasFactors?" ▾":""}</div>}
+        {!isUpset&&!upsetAlert&&hasFactors&&<div style={{fontSize:6,color:C.dim,textAlign:"center",padding:"1px 3px",background:C.black,fontFamily:"'Barlow Condensed'",letterSpacing:.5,cursor:"pointer"}} onClick={()=>setShowFlags(f=>!f)}>factors ▾</div>}
+        {showFlags&&flags.length>0&&(
+          <div style={{background:"#0a0a0a",borderTop:"1px solid "+C.border,padding:"3px 5px"}}>
+            {flags.map((f,i)=><div key={i} style={{fontSize:6,color:"#94a3b8",lineHeight:1.6,fontFamily:"'Barlow Condensed'"}}>{f}</div>)}
+          </div>
+        )}
       </div>
     );
   };

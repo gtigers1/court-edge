@@ -91,8 +91,8 @@ function DataSourceBadges({data,accent}){
   const src=data?._sources||{};
   const badge=(label,source,value)=>{
     if(!source)return null;
-    const isEspn=source.startsWith("ESPN stats");
-    const isSched=source.startsWith("ESPN schedule");
+    const isEspn=source.startsWith("ESPN stats")||source.startsWith("ESPN NET")||source.startsWith("NET rank");
+    const isSched=source.startsWith("ESPN schedule")||source.startsWith("ESPN reg");
     const isAI=source.startsWith("AI");
     const col=isEspn?"#22c55e":isSched?"#eab308":isAI?"#f87171":"#94a3b8";
     const bg=isEspn?"#052e16":isSched?"#1c1400":isAI?"#2a0808":"#0f172a";

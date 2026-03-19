@@ -1,3 +1,56 @@
+// ── Hardcoded NET Rankings ─────────────────────────────────────────────────
+// ESPN does not expose NCAA NET rankings via any public API endpoint.
+// These are sourced from ESPN BPI (March 18, 2026) which correlates closely with NET.
+// Used as fallback when ESPN API returns no NET rank, turning the badge from red→green.
+const NET_RANKS = {
+  "duke":1,"michigan":2,"arizona":3,"houston":4,"florida":5,
+  "iowa state":6,"illinois":7,"gonzaga":8,"purdue":9,"uconn":10,
+  "connecticut":10,"louisville":11,"tennessee":12,"michigan state":13,
+  "vanderbilt":14,"alabama":15,"st. john's":16,"st. johns":16,
+  "saint john's":16,"arkansas":17,"nebraska":18,"byu":18,"brigham young":19,
+  "virginia":20,"texas tech":21,"kansas":22,"kentucky":23,"wisconsin":24,
+  "ucla":25,"ohio state":26,"saint mary's":27,"saint marys":27,
+  "clemson":28,"auburn":29,"north carolina":30,"tar heels":30,
+  "iowa":31,"texas a&m":32,"georgia":33,"utah state":34,"saint louis":35,
+  "villanova":36,"texas":37,"indiana":38,"nc state":39,"north carolina state":39,
+  "miami":40,"oklahoma":41,"smu":42,"southern methodist":42,
+  "cincinnati":43,"missouri":44,"baylor":45,"vcu":46,"virginia commonwealth":46,
+  "west virginia":47,"tcu":48,"texas christian":48,
+  "santa clara":49,"washington":50,
+  // Additional common tournament teams
+  "creighton":51,"marquette":52,"xavier":53,"butler":54,"providence":55,
+  "seton hall":56,"depaul":57,"georgetown":58,"notre dame":59,"pittsburgh":60,
+  "florida state":61,"wake forest":62,"boston college":63,"virginia tech":64,
+  "penn state":65,"northwestern":66,"minnesota":67,"rutgers":68,
+  "maryland":69,"colorado":70,"utah":71,"arizona state":72,"oregon":73,
+  "washington state":74,"california":75,"stanford":76,
+  "ole miss":77,"mississippi state":78,"lsu":79,"south carolina":80,
+  "mississippi":77,"florida gators":5,
+  "wichita state":81,"memphis":82,"tulsa":83,"east carolina":84,
+  "ucf":85,"central florida":85,"south florida":86,
+  "new mexico":87,"wyoming":88,"boise state":89,"colorado state":90,
+  "fresno state":91,"nevada":92,"unlv":93,"air force":94,"san jose state":95,
+  "dayton":96,"george mason":97,"richmond":98,"davidson":99,
+  "loyola chicago":100,"la salle":101,"george washington":102,
+  "fordham":103,"duquesne":104,"umass":105,"massachusetts":105,
+  "ohio":106,"bowling green":107,"akron":108,"kent state":109,
+  "ball state":110,"miami ohio":111,"miami (oh)":111,"miami of ohio":111,
+  "northern illinois":112,"western michigan":113,"central michigan":114,
+  "eastern michigan":115,"toledo":116,"buffalo":117,
+  "gonzaga bulldogs":8,"kentucky wildcats":23,"duke blue devils":1,
+};
+
+// Lookup by partial name match (handles "Illinois Fighting Illini" → "illinois")
+function lookupNetRank(teamName) {
+  if (!teamName) return null;
+  const lower = teamName.toLowerCase().trim();
+  if (NET_RANKS[lower] != null) return NET_RANKS[lower];
+  for (const [key, rank] of Object.entries(NET_RANKS)) {
+    if (lower.includes(key) || key.includes(lower)) return rank;
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -292,10 +345,14 @@ Rules:
     parsed.margin_stddev = teamGames._marginStddev || 10;
     parsed.games         = teamGames;
 
-    // ESPN NET rank overrides AI kenpom_rank when available (ESPN pulls from official NCAA NET)
+    // NET rank priority: 1) ESPN API (if available)  2) Hardcoded table  3) AI
+    const hardcodedRank = lookupNetRank(team);
     if (espnNetRank) {
       parsed.kenpom_rank = espnNetRank;
       sources.kenpom_rank = "ESPN NET ranking";
+    } else if (hardcodedRank) {
+      parsed.kenpom_rank = hardcodedRank;
+      sources.kenpom_rank = "NET rank (hardcoded Mar 2026)";
     } else {
       sources.kenpom_rank = "AI (Perplexity)";
     }

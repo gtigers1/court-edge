@@ -2174,31 +2174,26 @@ function NCAATreePage(){
 }
 // ─────────────────────────────────────────────────────────────────────────────
 // NCAA UPSET ORACLE
-// Same ESPN API + 8-model ensemble as the Tree page, PLUS:
-//   • 40-year historical upset rates blended into every game probability
-//   • Upset alerts on game cards when underdog has 30%+ blended probability
-//   • "Upset Board" tab ranks all matchups by upset likelihood across all regions
+// Shows the FULL bracket (all 4 regions + Final Four) at once.
+// Auto-computes instantly using BT ratings (seed + SOS + conf).
+// One-click ESPN fetch upgrades all 64 teams to 8-model predictions.
+// Predicted upsets (model picks underdog to WIN) listed in Upset Picks tab.
 // ─────────────────────────────────────────────────────────────────────────────
 function NCAAOraclePage(){
   const ac=C.copper;
   const REGIONS=["East","West","South","Midwest"];
-  const TABS_ALL=[...REGIONS,"Final Four","Upset Board"];
-  const [activeTab,setActiveTab]=useState("East");
+  const [activeTab,setActiveTab]=useState("bracket");
   const [sels,setSels]=useState(()=>JSON.parse(JSON.stringify(INITIAL_BRACKET_2026)));
   const [store,setStore]=useState({});
   const [brackets,setBrackets]=useState({});
-  const [loading,setLoading]=useState({});
-  const [loadMsg,setLoadMsg]=useState({});
-  const [errors,setErrors]=useState({});
-  const setSel=(region,seed,team)=>{setSels(prev=>({...prev,[region]:{...prev[region],[seed]:team}}));setBrackets(prev=>{const n={...prev};delete n[region];return n;});};
+  const [fetching,setFetching]=useState(false);
+  const [fetchedCount,setFetchedCount]=useState(0);
   const R64_PAIRS=[[1,16],[8,9],[5,12],[4,13],[6,11],[3,14],[7,10],[2,15]];
 
-  // 40-year historical R64 upset rates (higher seed wins) — 1985-2025 NCAA data
+  // 40-year historical R64 upset rates
   const HIST_UPSET={"1-16":0.013,"2-15":0.083,"3-14":0.149,"4-13":0.208,"5-12":0.356,"6-11":0.369,"7-10":0.393,"8-9":0.487};
-  // Average upset counts per round, 40-year sample
-  const ROUND_UPSET_CTX={R64:{avg:11.5,games:32,pct:36},R32:{avg:6.5,games:16,pct:41},S16:{avg:3.2,games:8,pct:40},E8:{avg:1.8,games:4,pct:45},F4:{avg:0.9,games:2,pct:45},CHAMP:{avg:0.5,games:1,pct:50}};
-  // How much historical seed rate blends into model per round (tapers off in later rounds)
-  const UPSET_BLEND={R64:0.40,R32:0.30,S16:0.20,E8:0.10,F4:0.05,CHAMP:0.0};
+  const ROUND_UPSET_CTX={R64:{avg:11.5,pct:36},R32:{avg:6.5,pct:41},S16:{avg:3.2,pct:40},E8:{avg:1.8,pct:45}};
+  const UPSET_BLEND={R64:0.35,R32:0.25,S16:0.15,E8:0.08,F4:0.04,CHAMP:0.0};
 
   const histUpsetRate=(s1,s2)=>{
     const fav=Math.min(s1,s2),dog=Math.max(s1,s2);
@@ -2207,6 +2202,13 @@ function NCAAOraclePage(){
     const diff=dog-fav;
     if(diff>=8)return 0.05;if(diff>=6)return 0.12;if(diff>=4)return 0.22;
     if(diff>=3)return 0.30;if(diff>=2)return 0.37;if(diff>=1)return 0.44;return 0.50;
+  };
+
+  // BT rating: seed (calibrated to 40yr history) + SOS + conf — no ESPN needed
+  const btRating=(name,conf,seed)=>{
+    const base=SEED_BT[Math.max(0,Math.min(15,(seed||8)-1))];
+    const sos=SOS_RATINGS[name]??0;
+    return base+(sos-3.0)*0.12+((CONF_STRENGTH[conf]??5.5)-6.5)*0.10;
   };
 
   const confNormFn=(d,conf,teamName)=>{const sos=SOS_RATINGS[teamName]??null;const delta=sos!=null?(sos-3)*0.7:((CONF_STRENGTH[conf]||6.0)-6.5)*4.0;const ppg=d.ppg||70;const opp=d.opp||68;return{...d,ppg:Math.max(55,ppg+delta*0.60),opp:Math.max(45,opp-delta*0.40),tempo:d.tempo||68,sos_rating:sos};};
@@ -2222,38 +2224,32 @@ function NCAAOraclePage(){
       if(t2Under&&t2Rw>=2)p=Math.max(0.03,p-cScale*0.05*Math.min(t2Rw-1,3));
       return p;
     };
-    const favSeed=Math.min(t1.seed,t2.seed);const dogSeed=Math.max(t1.seed,t2.seed);
+    const favSeed=Math.min(t1.seed,t2.seed),dogSeed=Math.max(t1.seed,t2.seed);
     const hRate=histUpsetRate(favSeed,dogSeed);
     const blendW=UPSET_BLEND[round]||0;
-    // t1 is "home" (first in bracket slot); t1IsFav when its seed number is lower
     const t1IsFav=t1.seed<=t2.seed;
     const histForT1=t1IsFav?(1-hRate):hRate;
     let modelP,dataMode;
     if(t1.data&&t2.data){
       const sd1=safeData(t1.data),sd2=safeData(t2.data);
-      const hNorm=confNormFn({...sd1,conf:t1.teamObj.conf,seed:t1.seed},t1.teamObj.conf,t1.teamObj.name);
-      const aNorm=confNormFn({...sd2,conf:t2.teamObj.conf,seed:t2.seed},t2.teamObj.conf,t2.teamObj.name);
+      const hNorm=confNormFn({...sd1,conf:t1.teamObj?.conf,seed:t1.seed},t1.teamObj?.conf,t1.teamObj?.name);
+      const aNorm=confNormFn({...sd2,conf:t2.teamObj?.conf,seed:t2.seed},t2.teamObj?.conf,t2.teamObj?.name);
       const eff=ncaamMdlEfficiency(hNorm,aNorm,true);const pyth=ncaamMdlPythagorean(hNorm,aNorm,true);
       const ff=ncaamMdlFourFactors(sd1,sd2,true);const tal=ncaamMdlTalent(sd1,sd2,true);
       const mc=ncaamMdlMonteCarlo(hNorm,aNorm,3000,true);
       const cs=ncaamMdlConferenceStrength(hNorm,aNorm);
       const sa=ncaamMdlSeedAnchor(sd1,sd2,t2.seed,t1.seed);const la=ncaamMdlLuckAdjusted(hNorm,aNorm);
       const allPs=[eff,pyth,ff,tal,mc,cs,sa,la].filter(Boolean).map(m=>m.homeProb).filter(v=>!isNaN(v)&&isFinite(v));
-      if(!allPs.length){modelP=treeProb(t1.seed,t2.seed);dataMode=false;}
-      else{
-        const cons=ncaamConsensus(allPs,null,round);
-        const gap=Math.abs(t1.seed-t2.seed);
-        const hw=Math.min(0.40,gap*0.03);
-        modelP=Math.min(0.97,Math.max(0.03,cons*(1-hw)+treeProb(t1.seed,t2.seed)*hw));
-        dataMode=true;
-      }
+      if(!allPs.length){modelP=logistic(btRating(t1.teamObj?.name,t1.teamObj?.conf,t1.seed)-btRating(t2.teamObj?.name,t2.teamObj?.conf,t2.seed));dataMode=false;}
+      else{modelP=Math.min(0.97,Math.max(0.03,ncaamConsensus(allPs,null,round)));dataMode=true;}
     } else {
-      const lo=Math.min(t1.seed,t2.seed),hi=Math.max(t1.seed,t2.seed);
-      const base=TREE_HIST[lo+"-"+hi]!=null?TREE_HIST[lo+"-"+hi]:Math.min(0.97,Math.max(0.40,logistic((hi-lo)*0.20)));
-      modelP=t1.seed===lo?base:1-base;dataMode=false;
+      // Instant BT fallback: seed-calibrated ratings + SOS + conf, no API call needed
+      const r1=t1.teamObj?btRating(t1.teamObj.name,t1.teamObj.conf,t1.seed):(SEED_BT[Math.min(15,t1.seed-1)]??0);
+      const r2=t2.teamObj?btRating(t2.teamObj.name,t2.teamObj.conf,t2.seed):(SEED_BT[Math.min(15,t2.seed-1)]??0);
+      modelP=logistic(r1-r2);dataMode=false;
     }
     const blended=Math.min(0.97,Math.max(0.03,modelP*(1-blendW)+histForT1*blendW));
-    return{p:applySurvivor(blended),dataMode,histRate:hRate,dogSeed,favSeed,blendW};
+    return{p:applySurvivor(blended),dataMode,histRate:hRate,dogSeed,favSeed};
   };
 
   const adv=(team)=>({...team,roundsWon:(team.roundsWon||0)+1});
@@ -2266,274 +2262,279 @@ function NCAAOraclePage(){
     const g8=runGame(s16[0].w,s16[1].w,"E8");const w8=g8.p>=0.5?adv(s16[0].w):adv(s16[1].w);
     return{r64,r32,s16,e8:{t1:s16[0].w,t2:s16[1].w,p:g8.p,w:w8,dataMode:g8.dataMode,histRate:g8.histRate,dogSeed:g8.dogSeed,favSeed:g8.favSeed,round:"E8"}};
   };
-  const analyzeRegion=async(region)=>{
-    const sel=sels[region];const toFetch=[];
-    for(let s=1;s<=16;s++){if(sel[s]&&!store[sel[s].id])toFetch.push(sel[s]);}
-    setLoading(prev=>({...prev,[region]:true}));setErrors(prev=>({...prev,[region]:""}));
+
+  // Recompute all brackets whenever sels or store changes (instant BT fallback = always ready)
+  useEffect(()=>{
+    const computed={};
+    REGIONS.forEach(r=>{computed[r]=computeBracket(r,sels,store);});
+    setBrackets(computed);
+  },[sels,store]);// eslint-disable-line
+
+  const totalTeams=REGIONS.reduce((n,r)=>n+Object.values(sels[r]).filter(Boolean).length,0);
+  const fetchedTotal=Object.keys(store).length;
+
+  const fetchAll=async()=>{
+    const all=[];
+    REGIONS.forEach(r=>{for(let s=1;s<=16;s++){if(sels[r][s]&&!store[sels[r][s].id])all.push(sels[r][s]);}});
+    if(!all.length)return;
+    setFetching(true);setFetchedCount(0);
     const nd={};
-    try{
-      for(let i=0;i<toFetch.length;i+=4){
-        const batch=toFetch.slice(i,i+4);
-        setLoadMsg(prev=>({...prev,[region]:"Fetching teams "+(i+1)+"-"+Math.min(i+4,toFetch.length)+" of "+toFetch.length+"..."}));
-        const res=await Promise.all(batch.map(t=>fetch("/api/ncaam",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({teamId:t.id,team:t.name})}).then(r=>r.json()).then(d=>({id:t.id,data:d})).catch(()=>({id:t.id,data:null}))));
-        res.forEach(function(r){if(r.data&&!r.data.error)nd[r.id]=r.data;});
-      }
-      const ms=Object.assign({},store,nd);setStore(ms);
-      setLoadMsg(prev=>({...prev,[region]:"Running upset analysis..."}));
-      setBrackets(prev=>({...prev,[region]:computeBracket(region,sels,ms)}));
-    }catch(e){setErrors(prev=>({...prev,[region]:e.message}));}
-    setLoading(prev=>({...prev,[region]:false}));setLoadMsg(prev=>({...prev,[region]:""}));
+    for(let i=0;i<all.length;i+=4){
+      const batch=all.slice(i,i+4);
+      const res=await Promise.all(batch.map(t=>fetch("/api/ncaam",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({teamId:t.id,team:t.name})}).then(r=>r.json()).then(d=>({id:t.id,data:d})).catch(()=>({id:t.id,data:null}))));
+      res.forEach(r=>{if(r.data&&!r.data.error)nd[r.id]=r.data;});
+      setFetchedCount(i+batch.length);
+    }
+    setStore(prev=>({...prev,...nd}));setFetching(false);
   };
+
   const getFinal4=()=>{
-    const getChamp=(r)=>{
-      if(brackets[r])return brackets[r].e8.w;
-      const sel=sels[r];
-      const mk=s=>({name:sel[s]?sel[s].name:(s+" Seed"),seed:s,teamObj:sel[s]||null,data:sel[s]?store[sel[s].id]||null:null,roundsWon:0});
-      const r64=R64_PAIRS.map(([s1,s2])=>{const t1=mk(s1),t2=mk(s2);const g=runGame(t1,t2,"R64");return{w:g.p>=0.5?adv(t1):adv(t2)};});
-      const r32=[[0,1],[2,3],[4,5],[6,7]].map(([i,j])=>{const g=runGame(r64[i].w,r64[j].w,"R32");return{w:g.p>=0.5?adv(r64[i].w):adv(r64[j].w)};});
-      const s16=[[0,1],[2,3]].map(([i,j])=>{const g=runGame(r32[i].w,r32[j].w,"S16");return{w:g.p>=0.5?adv(r32[i].w):adv(r32[j].w)};});
-      const g=runGame(s16[0].w,s16[1].w,"E8");return g.p>=0.5?adv(s16[0].w):adv(s16[1].w);
-    };
-    const champs=REGIONS.map(r=>getChamp(r));
+    const champs=REGIONS.map(r=>brackets[r]?.e8.w||{name:r+" TBD",seed:1,teamObj:null,data:null,roundsWon:4});
     const f4=[[0,2],[1,3]].map(([i,j])=>{const t1=champs[i],t2=champs[j];const g=runGame(t1,t2,"F4");return{t1,t2,p:g.p,w:g.p>=0.5?t1:t2,dataMode:g.dataMode,histRate:g.histRate,round:"F4"};});
     const gC=runGame(f4[0].w,f4[1].w,"CHAMP");
-    return{f4,champ:{t1:f4[0].w,t2:f4[1].w,p:gC.p,w:gC.p>=0.5?f4[0].w:f4[1].w,dataMode:gC.dataMode,histRate:gC.histRate,round:"CHAMP"}};
+    return{f4,champ:{t1:f4[0].w,t2:f4[1].w,p:gC.p,w:gC.p>=0.5?f4[0].w:f4[1].w,dataMode:gC.dataMode,round:"CHAMP"}};
   };
-  const getAllGames=()=>{
-    const games=[];
+
+  // Collect predicted upsets (model picks underdog to WIN) and close-game alerts
+  const getAllUpsets=()=>{
+    const picks=[];
     REGIONS.forEach(region=>{
       const bd=brackets[region];if(!bd)return;
-      const collect=(list)=>list.forEach(g=>{
-        if(!g)return;
-        const favSeed=Math.min(g.t1.seed,g.t2.seed);const dogSeed=Math.max(g.t1.seed,g.t2.seed);
-        const favTeam=g.t1.seed<=g.t2.seed?g.t1:g.t2;const dogTeam=g.t1.seed<=g.t2.seed?g.t2:g.t1;
+      const check=(g,roundLabel)=>{
+        if(!g||g.t1.seed===g.t2.seed)return;
+        const favSeed=Math.min(g.t1.seed,g.t2.seed);
+        const dogSeed=Math.max(g.t1.seed,g.t2.seed);
+        const favTeam=g.t1.seed<g.t2.seed?g.t1:g.t2;
+        const dogTeam=g.t1.seed>g.t2.seed?g.t1:g.t2;
         const dogProb=g.t1.seed>g.t2.seed?g.p:(1-g.p);
-        if(dogProb>0.20)games.push({...g,region,favTeam,dogTeam,dogProb,favSeed,dogSeed,histRate:g.histRate||histUpsetRate(favSeed,dogSeed)});
-      });
-      collect(bd.r64);collect(bd.r32);collect(bd.s16);collect([bd.e8]);
+        const isUpset=g.w&&g.w.seed===dogSeed;
+        if(isUpset||dogProb>=0.35)picks.push({...g,region,roundLabel,isUpset,dogProb,favTeam,dogTeam,favSeed,dogSeed});
+      };
+      bd.r64.forEach(g=>check(g,"R64"));
+      bd.r32.forEach(g=>check(g,"R32"));
+      bd.s16.forEach(g=>check(g,"S16"));
+      check(bd.e8,"E8");
     });
-    return games.sort((a,b)=>b.dogProb-a.dogProb);
+    return picks.sort((a,b)=>(b.isUpset-a.isUpset)||(b.dogSeed-a.dogSeed)||(b.dogProb-a.dogProb));
   };
 
-  const isF4=activeTab==="Final Four";
-  const isUpsetBoard=activeTab==="Upset Board";
-  const bd=(!isF4&&!isUpsetBoard)?brackets[activeTab]:null;
-  const filledCount=(!isF4&&!isUpsetBoard)?Object.values(sels[activeTab]||{}).filter(Boolean).length:0;
-  const isLoading=loading[activeTab];
-
-  const OracleCard=({game})=>{
+  // Compact game card for full bracket display
+  const OCard=({game})=>{
     if(!game)return null;
-    const t1w=game.w?.name===game.t1?.name&&game.w?.seed===game.t1?.seed;
-    const favSeed=Math.min(game.t1.seed,game.t2.seed);const dogSeed=Math.max(game.t1.seed,game.t2.seed);
+    const t1w=game.w?.seed===game.t1?.seed&&game.w?.name===game.t1?.name;
+    const isUpset=game.w&&game.t1.seed!==game.t2.seed&&game.w.seed>Math.min(game.t1.seed,game.t2.seed);
     const dogProb=game.t1.seed>game.t2.seed?game.p:(1-game.p);
-    const isUpset=game.w?.seed>favSeed&&game.t1.seed!==game.t2.seed;
-    const hRate=game.histRate||histUpsetRate(favSeed,dogSeed);
-    const strongAlert=dogProb>=0.40&&dogSeed>favSeed;
-    const softAlert=dogProb>=0.30&&dogSeed>favSeed;
-    const Row=({team,prob,win})=>(
-      <div style={{display:"flex",alignItems:"center",gap:4,padding:"3px 6px",borderRadius:3,background:win?ac+"18":"transparent",border:win?"1px solid "+ac+"33":"1px solid transparent"}}>
-        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:9,color:ac,minWidth:14,textAlign:"center",background:ac+"22",borderRadius:2,padding:"0 2px"}}>{team.seed}</span>
-        <span style={{fontSize:10,color:win?C.white:C.muted,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:win?700:400}}>{team.name}</span>
-        <span style={{fontFamily:"'Barlow Condensed'",fontSize:9,fontWeight:700,color:win?ac:C.dim,minWidth:26,textAlign:"right"}}>{(prob*100).toFixed(0)}%</span>
+    const upsetAlert=!isUpset&&dogProb>=0.38&&game.t1.seed!==game.t2.seed;
+    const hRate=game.histRate||0;
+    const borderCol=isUpset?"#f97316":upsetAlert?"#eab30888":C.border;
+    const shortenName=(n)=>n.replace(" Blue Devils","").replace(" Wildcats","").replace(" Bulldogs","").replace(" Tigers","").replace(" Jayhawks","").replace(" Tar Heels","").replace(" Volunteers","").replace(" Gators","").replace(" Longhorns","").replace(" Trojans","").replace(" RedHawks","");
+    const R=({team,prob,win})=>(
+      <div style={{display:"flex",alignItems:"center",gap:3,padding:"2px 5px",background:win?ac+"18":"transparent",borderRadius:2}}>
+        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:8,color:win&&isUpset?"#f97316":ac,minWidth:13,textAlign:"center",background:ac+"22",borderRadius:2,padding:"0 2px",flexShrink:0}}>{team.seed}</span>
+        <span style={{fontSize:9,color:win?C.white:C.muted,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:win?700:400}}>{shortenName(team.name)}</span>
+        <span style={{fontFamily:"'Barlow Condensed'",fontSize:8,fontWeight:700,color:win?(isUpset?"#f97316":ac):C.dim,minWidth:24,textAlign:"right",flexShrink:0}}>{(prob*100).toFixed(0)}%</span>
       </div>
     );
     return(
-      <div style={{background:C.black,border:"1px solid "+(strongAlert?"#f97316":(softAlert?"#f9731644":isUpset?"#ef444466":C.border)),borderRadius:6,overflow:"hidden",width:"100%"}}>
-        <div style={{padding:"3px 4px"}}>
-          <Row team={game.t1} prob={game.p} win={t1w}/>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"1px 6px"}}>
-            <span style={{fontSize:7,color:C.dim}}>vs</span>
-            {hRate>0.15&&<span style={{fontSize:7,color:hRate>0.35?"#f97316":hRate>0.20?"#eab308":C.dim,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}>hist {(hRate*100).toFixed(0)}%</span>}
-          </div>
-          <Row team={game.t2} prob={1-game.p} win={!t1w}/>
-        </div>
-        {strongAlert&&<div style={{fontSize:7,color:"#f97316",textAlign:"center",padding:"2px 4px",background:"#f9731611",letterSpacing:1,fontFamily:"'Barlow Condensed'",fontWeight:700}}>🔥 STRONG UPSET — #{dogSeed} seed wins {(hRate*100).toFixed(0)}% hist</div>}
-        {!strongAlert&&softAlert&&<div style={{fontSize:7,color:"#eab308",textAlign:"center",padding:"2px 4px",background:"#eab30811",letterSpacing:1,fontFamily:"'Barlow Condensed'",fontWeight:700}}>⚡ UPSET ALERT — #{dogSeed} seed wins {(hRate*100).toFixed(0)}% hist</div>}
-        {isUpset&&!softAlert&&<div style={{fontSize:7,color:"#f87171",textAlign:"center",padding:"2px",background:"#f8717111",letterSpacing:1,fontFamily:"'Barlow Condensed'",fontWeight:700}}>UPSET PICK</div>}
+      <div style={{background:C.black,border:"1px solid "+borderCol,borderRadius:4,overflow:"hidden",width:"100%"}}>
+        <R team={game.t1} prob={game.p} win={t1w}/>
+        <R team={game.t2} prob={1-game.p} win={!t1w}/>
+        {isUpset&&<div style={{fontSize:6,color:"#f97316",textAlign:"center",padding:"1px 3px",background:"#f9731611",fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:.5}}>🔥 UPSET · hist {(hRate*100).toFixed(0)}%</div>}
+        {upsetAlert&&<div style={{fontSize:6,color:"#eab308",textAlign:"center",padding:"1px 3px",background:"#eab30811",fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:.5}}>⚡ WATCH · {(dogProb*100).toFixed(0)}%</div>}
       </div>
     );
   };
 
-  const BH=440;
-  const RoundCol=({games,label})=>(
-    <div style={{display:"flex",flexDirection:"column",minWidth:130,flex:1}}>
-      <div style={{textAlign:"center",fontSize:8,color:C.muted,letterSpacing:1.5,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",fontWeight:700,padding:"4px 0",borderBottom:"1px solid "+C.border+"44",marginBottom:4}}>{label}</div>
-      <div style={{display:"flex",flexDirection:"column",justifyContent:"space-evenly",height:BH,gap:4}}>
-        {games.map((g,i)=><OracleCard key={i} game={g}/>)}
+  const BH=300;
+  const RegionBracket=({region})=>{
+    const bd=brackets[region];
+    if(!bd)return<div style={{padding:16,color:C.dim,fontSize:10,textAlign:"center"}}>Computing...</div>;
+    const Col=({games,label})=>(
+      <div style={{display:"flex",flexDirection:"column",minWidth:100,flex:1}}>
+        <div style={{textAlign:"center",fontSize:7,color:C.muted,letterSpacing:1,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",fontWeight:700,padding:"3px 0",borderBottom:"1px solid "+C.border+"44",marginBottom:3}}>{label}</div>
+        <div style={{display:"flex",flexDirection:"column",justifyContent:"space-evenly",height:BH,gap:3}}>
+          {games.map((g,i)=><OCard key={i} game={g}/>)}
+        </div>
       </div>
-    </div>
-  );
+    );
+    return(
+      <div style={{overflowX:"auto"}}>
+        <div style={{display:"flex",gap:6,minWidth:500,padding:"10px 12px"}}>
+          <Col games={bd.r64} label="Round of 64"/>
+          <Col games={bd.r32} label="Round of 32"/>
+          <Col games={bd.s16} label="Sweet 16"/>
+          <Col games={[bd.e8]} label="Elite 8"/>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minWidth:76,flexShrink:0}}>
+            <div style={{fontSize:6,color:C.muted,letterSpacing:1,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",marginBottom:6,textAlign:"center"}}>REGIONAL<br/>CHAMP</div>
+            <div style={{background:"linear-gradient(135deg,"+ac+"22,"+ac+"11)",border:"1.5px solid "+ac,borderRadius:8,padding:"10px 6px",textAlign:"center",width:"100%"}}>
+              <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:16,color:bd.e8.w.seed>4?"#f97316":ac}}>#{bd.e8.w.seed}</div>
+              <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:9,color:C.white,marginTop:2,lineHeight:1.3}}>{bd.e8.w.name}</div>
+              <div style={{fontSize:6,color:bd.e8.dataMode?ac+"66":C.dim,marginTop:3}}>{bd.e8.dataMode?"8-model":"BT+SOS"}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const f4d=Object.keys(brackets).length===4?getFinal4():null;
+  const allUpsets=getAllUpsets();
+  const predictedUpsets=allUpsets.filter(u=>u.isUpset);
+  const upsetAlerts=allUpsets.filter(u=>!u.isUpset);
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      {/* Header */}
+      {/* Header card */}
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-        <SectionHeader label="NCAA Upset Oracle" accent={ac} right={<span style={{fontSize:10,color:C.muted}}>8-model ESPN ensemble + 40yr historical upset rates · surfaces best upsets by round</span>}/>
-        <div style={{display:"flex",gap:2,padding:"8px 12px",borderBottom:"1px solid "+C.border,overflowX:"auto"}}>
-          {TABS_ALL.map(tab=>(
-            <button key={tab} onClick={()=>setActiveTab(tab)} style={{padding:"6px 14px",borderRadius:6,border:"none",cursor:"pointer",flexShrink:0,background:activeTab===tab?ac+"22":"transparent",color:activeTab===tab?ac:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1,borderBottom:activeTab===tab?"2px solid "+ac:"2px solid transparent",transition:"all .15s"}}>
-              {tab==="Final Four"?"FINAL FOUR":tab==="Upset Board"?"🔥 UPSETS":tab.toUpperCase()}
-              {!["Final Four","Upset Board"].includes(tab)&&brackets[tab]&&<span style={{marginLeft:5,fontSize:8,color:ac+"88"}}>✓</span>}
-            </button>
-          ))}
-        </div>
-        {/* Historical upset context bar */}
-        <div style={{padding:"6px 14px",background:C.black+"88",borderBottom:"1px solid "+C.border,display:"flex",gap:20,overflowX:"auto",alignItems:"center"}}>
-          {Object.entries(ROUND_UPSET_CTX).map(([rnd,d])=>(
-            <div key={rnd} style={{flexShrink:0,textAlign:"center"}}>
-              <div style={{fontSize:7,color:C.dim,fontFamily:"'Barlow Condensed'",letterSpacing:1,textTransform:"uppercase"}}>{rnd}</div>
-              <div style={{fontSize:13,color:ac,fontFamily:"'Barlow Condensed'",fontWeight:900,lineHeight:1}}>{d.avg}</div>
-              <div style={{fontSize:7,color:C.muted}}>avg upsets/yr</div>
-              <div style={{marginTop:3,height:2,background:C.border,borderRadius:1,overflow:"hidden",width:36}}>
-                <div style={{height:"100%",width:d.pct+"%",background:ac+"88"}}/>
-              </div>
+        <SectionHeader label="NCAA Upset Oracle" accent={ac}
+          right={
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:10,color:fetchedTotal>0?"#22c55e":C.muted,fontFamily:"'Barlow Condensed'"}}>
+                {fetchedTotal>0?fetchedTotal+"/"+totalTeams+" ESPN loaded":"BT+SOS instant"}
+              </span>
+              <button onClick={fetchAll} disabled={fetching||fetchedTotal>=totalTeams} style={{padding:"5px 16px",borderRadius:6,border:"none",cursor:fetching||fetchedTotal>=totalTeams?"not-allowed":"pointer",background:fetchedTotal>=totalTeams?"#22c55e22":fetching?C.border:ac,color:fetchedTotal>=totalTeams?"#22c55e":C.black,fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:11,letterSpacing:.5,whiteSpace:"nowrap"}}>
+                {fetching?`FETCHING ${fetchedCount}/${totalTeams}...`:(fetchedTotal>=totalTeams?"✓ ESPN LOADED":"FETCH ALL ESPN DATA")}
+              </button>
             </div>
-          ))}
-          <div style={{fontSize:9,color:C.dim,marginLeft:8,lineHeight:1.5,maxWidth:180}}>Historical averages 1985–2025. 🔥 = model gives underdog 40%+, ⚡ = 30–40%</div>
-        </div>
-      </div>
-
-      {/* Region view */}
-      {!isF4&&!isUpsetBoard&&<>
-        <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-          <div style={{padding:"10px 16px",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:ac,borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-            {activeTab.toUpperCase()} REGION — TEAM SELECTION
-            <span style={{marginLeft:"auto",fontSize:11,color:C.muted,fontWeight:400}}>{filledCount}/16 teams selected</span>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:8,padding:12}}>
-            {Array.from({length:16},(_,i)=>i+1).map(seed=>(
-              <div key={seed}>
-                <div style={{fontSize:8,color:ac+"88",marginBottom:3,fontFamily:"'Barlow Condensed'",fontWeight:700,letterSpacing:1}}>SEED #{seed}</div>
-                <TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={sels[activeTab][seed]?sels[activeTab][seed].name:""} accent={ac} placeholder={"Select #"+seed+" seed..."} onSelect={t=>setSel(activeTab,seed,t)}/>
+          }/>
+        {/* Tab row + historical context */}
+        <div style={{display:"flex",alignItems:"center",gap:4,padding:"6px 12px",borderBottom:"1px solid "+C.border,flexWrap:"wrap"}}>
+          <button onClick={()=>setActiveTab("bracket")} style={{padding:"5px 16px",borderRadius:5,border:"none",cursor:"pointer",background:activeTab==="bracket"?ac+"22":"transparent",color:activeTab==="bracket"?ac:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,letterSpacing:.5,borderBottom:activeTab==="bracket"?"2px solid "+ac:"2px solid transparent"}}>
+            FULL BRACKET
+          </button>
+          <button onClick={()=>setActiveTab("upsets")} style={{padding:"5px 16px",borderRadius:5,border:"none",cursor:"pointer",background:activeTab==="upsets"?ac+"22":"transparent",color:activeTab==="upsets"?ac:C.muted,fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:12,letterSpacing:.5,borderBottom:activeTab==="upsets"?"2px solid "+ac:"2px solid transparent"}}>
+              🔥 UPSET PICKS
+              {predictedUpsets.length>0&&<span style={{marginLeft:6,background:"#f97316",color:C.black,borderRadius:10,padding:"1px 7px",fontSize:10,fontFamily:"'Barlow Condensed'",fontWeight:900}}>{predictedUpsets.length}</span>}
+          </button>
+          <div style={{marginLeft:"auto",display:"flex",gap:14,alignItems:"center"}}>
+            {Object.entries(ROUND_UPSET_CTX).map(([rnd,d])=>(
+              <div key={rnd} style={{textAlign:"center",flexShrink:0}}>
+                <div style={{fontSize:6,color:C.dim,fontFamily:"'Barlow Condensed'",letterSpacing:.5,textTransform:"uppercase"}}>{rnd}</div>
+                <div style={{fontSize:11,color:ac,fontFamily:"'Barlow Condensed'",fontWeight:700,lineHeight:1}}>{d.avg}</div>
+                <div style={{fontSize:6,color:C.dim}}>upsets/yr</div>
               </div>
             ))}
           </div>
-          <div style={{padding:"10px 16px",borderTop:"1px solid "+C.border,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-            <button onClick={()=>analyzeRegion(activeTab)} disabled={isLoading||filledCount===0} style={{padding:"10px 24px",borderRadius:8,border:"none",cursor:isLoading||filledCount===0?"not-allowed":"pointer",background:isLoading||filledCount===0?C.dim:ac,color:C.black,fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:13,letterSpacing:1}}>
-              {isLoading?"ANALYZING...":"FETCH AND ANALYZE REGION"}
-            </button>
-            {isLoading&&<span style={{fontSize:11,color:ac,fontFamily:"'Barlow Condensed'"}}><span className="pulse">{loadMsg[activeTab]||"Loading..."}</span></span>}
-            {errors[activeTab]&&<span style={{fontSize:11,color:"#f87171"}}>{errors[activeTab]}</span>}
-            <span style={{fontSize:10,color:C.muted,marginLeft:"auto"}}>8 models · blends 40yr upset rates · 🔥 strong upset · ⚡ upset alert</span>
-          </div>
         </div>
-        {bd&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-          <div style={{padding:"10px 16px",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:ac,borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            {activeTab.toUpperCase()} PROJECTED BRACKET
-            <span style={{marginLeft:"auto",fontSize:11,color:C.muted,fontWeight:400}}>Champion: <span style={{color:ac,fontWeight:700}}>#{bd.e8.w.seed} {bd.e8.w.name}</span></span>
+        <div style={{padding:"5px 14px",background:C.black,fontSize:9,color:C.muted}}>
+          🔥 orange border = model picks underdog to WIN &nbsp;·&nbsp; ⚡ yellow = underdog 35%+ chance &nbsp;·&nbsp; Regional champs shown orange when seed ≥ 5
+        </div>
+      </div>
+
+      {/* ── FULL BRACKET VIEW ── */}
+      {activeTab==="bracket"&&<>
+        {REGIONS.map(region=>(
+          <div key={region} style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <div style={{padding:"8px 14px",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid "+C.border}}>
+              <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:13,color:ac,letterSpacing:1.5}}>{region.toUpperCase()} REGION</span>
+              {brackets[region]&&<span style={{fontSize:11,color:C.muted}}>→ <span style={{color:brackets[region].e8.w.seed>4?"#f97316":ac,fontWeight:700}}>#{brackets[region].e8.w.seed} {brackets[region].e8.w.name}</span></span>}
+              <span style={{marginLeft:"auto",fontSize:9,color:C.dim,fontFamily:"'Barlow Condensed'"}}>
+                {brackets[region]?.e8.dataMode?"8-model (ESPN)":"BT+SOS instant"}
+              </span>
+            </div>
+            <RegionBracket region={region}/>
           </div>
-          <div style={{overflowX:"auto",padding:12}}>
-            <div style={{display:"flex",gap:8,minWidth:580}}>
-              <RoundCol games={bd.r64} label="Round of 64"/>
-              <RoundCol games={bd.r32} label="Round of 32"/>
-              <RoundCol games={bd.s16} label="Sweet 16"/>
-              <RoundCol games={[bd.e8]} label="Elite Eight"/>
-              <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minWidth:90,padding:"8px 4px"}}>
-                <div style={{fontSize:7,color:C.muted,letterSpacing:1.5,textTransform:"uppercase",fontFamily:"'Barlow Condensed'",marginBottom:8,textAlign:"center"}}>REGIONAL<br/>CHAMPION</div>
-                <div style={{background:"linear-gradient(135deg,"+ac+"22,"+ac+"11)",border:"2px solid "+ac,borderRadius:10,padding:"10px",textAlign:"center"}}>
-                  <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:ac}}>#{bd.e8.w.seed}</div>
-                  <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:11,color:C.white,marginTop:2,lineHeight:1.2}}>{bd.e8.w.name}</div>
-                  <div style={{fontSize:7,color:bd.e8.dataMode?ac+"66":C.dim,marginTop:2}}>{bd.e8.dataMode?"8-model":"seed-based"}</div>
-                </div>
-              </div>
+        ))}
+
+        {f4d&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+          <div style={{padding:"8px 14px",fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:13,color:ac,letterSpacing:1.5,borderBottom:"1px solid "+C.border}}>
+            FINAL FOUR & CHAMPIONSHIP
+          </div>
+          <div style={{padding:14,display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-start"}}>
+            <div style={{flex:"1 1 210px"}}>
+              <div style={{fontSize:9,color:C.muted,fontFamily:"'Barlow Condensed'",letterSpacing:1,marginBottom:6,textTransform:"uppercase"}}>Semifinal 1 · East vs South</div>
+              <OCard game={f4d.f4[0]}/>
+            </div>
+            <div style={{flex:"1 1 210px"}}>
+              <div style={{fontSize:9,color:C.muted,fontFamily:"'Barlow Condensed'",letterSpacing:1,marginBottom:6,textTransform:"uppercase"}}>Semifinal 2 · West vs Midwest</div>
+              <OCard game={f4d.f4[1]}/>
+            </div>
+            <div style={{flex:"1 1 210px"}}>
+              <div style={{fontSize:9,color:ac,fontFamily:"'Barlow Condensed'",letterSpacing:1,marginBottom:6,textTransform:"uppercase"}}>Championship</div>
+              <OCard game={f4d.champ}/>
+            </div>
+            <div style={{flex:"1 1 160px",textAlign:"center",padding:"16px 10px",background:"linear-gradient(135deg,"+ac+"22,"+ac+"11)",border:"2px solid "+ac,borderRadius:10}}>
+              <div style={{fontSize:7,color:C.muted,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>NATIONAL CHAMPION</div>
+              <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:24,color:f4d.champ.w.seed>4?"#f97316":ac}}>{f4d.champ.w.seed>4?"🔥 ":""}#{f4d.champ.w.seed}</div>
+              <div style={{fontFamily:"'Barlow Condensed'",fontWeight:700,fontSize:13,color:C.white,lineHeight:1.2}}>{f4d.champ.w.name}</div>
+              <div style={{fontSize:8,color:f4d.champ.dataMode?ac+"88":C.dim,marginTop:4}}>{f4d.champ.dataMode?"8-model":"BT+SOS"} · {(Math.max(f4d.champ.p,1-f4d.champ.p)*100).toFixed(1)}%</div>
             </div>
           </div>
-        </div>}
-        {!bd&&!isLoading&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:32,textAlign:"center",color:C.muted,fontFamily:"'Barlow Condensed'",fontSize:13,letterSpacing:1}}>
-          {filledCount>0?"Click FETCH AND ANALYZE REGION to generate the upset-aware bracket":"Select teams above, then click FETCH AND ANALYZE REGION"}
         </div>}
       </>}
 
-      {/* Final Four */}
-      {isF4&&(()=>{const f4d=getFinal4();return(
-        <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-          <div style={{padding:"10px 16px",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:ac,borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-            FINAL FOUR AND CHAMPIONSHIP
-            <span style={{marginLeft:12,fontSize:10,color:C.muted,fontWeight:400}}>{REGIONS.filter(r=>brackets[r]).length}/4 regions with real data</span>
+      {/* ── UPSET PICKS VIEW ── */}
+      {activeTab==="upsets"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {/* Predicted upsets — model picks the dog to WIN */}
+          <div style={{background:C.card,border:"1px solid #f9731644",borderRadius:12,overflow:"hidden"}}>
+            <div style={{padding:"10px 16px",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:"#f97316",borderBottom:"1px solid #f9731622",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              🔥 PREDICTED UPSETS — Model picks the underdog to WIN
+              <span style={{marginLeft:"auto",fontSize:10,color:C.muted,fontWeight:400}}>Sorted by seed gap — bigger seed gap = bigger upset</span>
+            </div>
+            <div style={{padding:10,display:"flex",flexDirection:"column",gap:6}}>
+              {predictedUpsets.length===0&&(
+                <div style={{padding:"24px",textAlign:"center",color:C.muted,fontSize:12,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}>
+                  No upsets predicted with current data.<br/>
+                  <span style={{fontSize:10,color:C.dim}}>Click "FETCH ALL ESPN DATA" to upgrade to 8-model predictions which can identify more upsets.</span>
+                </div>
+              )}
+              {predictedUpsets.map((g,i)=>{
+                const seedDiff=g.dogSeed-g.favSeed;
+                const shock=seedDiff>=8?"MEGA UPSET":seedDiff>=6?"SHOCKER":seedDiff>=4?"BIG UPSET":seedDiff>=2?"UPSET":"CLOSE CALL";
+                const col=seedDiff>=6?"#ef4444":seedDiff>=4?"#f97316":seedDiff>=2?"#eab308":C.amber;
+                return(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderRadius:10,background:col+"08",border:"1px solid "+col+"44"}}>
+                    <div style={{flexShrink:0,textAlign:"center",minWidth:56}}>
+                      <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:8,color:col,letterSpacing:1,textTransform:"uppercase"}}>{shock}</div>
+                      <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:22,color:col,lineHeight:1}}>{(g.dogProb*100).toFixed(0)}%</div>
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
+                        <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:13,color:col,background:col+"22",borderRadius:4,padding:"0 6px"}}>#{g.dogSeed}</span>
+                        <span style={{fontSize:14,color:C.white,fontWeight:700}}>{g.dogTeam.name}</span>
+                        <span style={{fontSize:10,color:C.muted}}>beats</span>
+                        <span style={{fontSize:12,color:C.muted}}>#{g.favSeed} {g.favTeam.name}</span>
+                      </div>
+                      <div style={{display:"flex",gap:12,fontSize:10,color:C.dim,fontFamily:"'Barlow Condensed'",flexWrap:"wrap"}}>
+                        <span style={{color:ac+"88"}}>{g.round}</span>
+                        <span>{g.region} Region</span>
+                        <span>hist rate: {(g.histRate*100).toFixed(0)}%</span>
+                        <span style={{color:g.dataMode?"#22c55e88":"#94a3b8"}}>{g.dataMode?"8-model":"BT+SOS"}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div style={{padding:16,display:"flex",flexDirection:"column",gap:16}}>
-            <div>
-              <div style={{fontSize:10,color:C.muted,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8,fontFamily:"'Barlow Condensed'",fontWeight:700}}>Semifinals</div>
-              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-                {f4d.f4.map((g,i)=>(<div key={i} style={{flex:"1 1 260px"}}><div style={{fontSize:9,color:C.muted,marginBottom:4,fontFamily:"'Barlow Condensed'",letterSpacing:1}}>{REGIONS[i*2]} vs {REGIONS[i*2+1]}</div><OracleCard game={g}/></div>))}
-              </div>
-            </div>
-            <div>
-              <div style={{fontSize:10,color:ac,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8,fontFamily:"'Barlow Condensed'",fontWeight:700}}>Championship</div>
-              <div style={{maxWidth:300}}><OracleCard game={f4d.champ}/></div>
-            </div>
-            <div style={{textAlign:"center",padding:20,background:"linear-gradient(135deg,"+ac+"22,"+ac+"11)",border:"2px solid "+ac,borderRadius:12}}>
-              <div style={{fontSize:9,color:C.muted,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>PROJECTED NATIONAL CHAMPION</div>
-              <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:28,color:ac}}>#{f4d.champ.w.seed} {f4d.champ.w.name}</div>
-              <div style={{fontSize:10,color:f4d.champ.dataMode?ac+"88":C.dim,marginTop:4}}>
-                {f4d.champ.dataMode?"8-model consensus":"Seed-based — analyze regions for real model data"}{" | "}{(Math.max(f4d.champ.p,1-f4d.champ.p)*100).toFixed(1)}% probability
-              </div>
-            </div>
-          </div>
-        </div>
-      );})()}
 
-      {/* Upset Board */}
-      {isUpsetBoard&&(()=>{
-        const games=getAllGames();
-        const analyzed=REGIONS.filter(r=>brackets[r]);
-        return(
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8}}>
-              {Object.entries(ROUND_UPSET_CTX).slice(0,4).map(([rnd,d])=>(
-                <div key={rnd} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px",textAlign:"center"}}>
-                  <div style={{fontSize:9,color:C.muted,fontFamily:"'Barlow Condensed'",letterSpacing:1.5,marginBottom:4,textTransform:"uppercase"}}>{rnd}</div>
-                  <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:24,color:ac,lineHeight:1}}>{d.avg}</div>
-                  <div style={{fontSize:9,color:C.muted,marginTop:2}}>avg upsets / yr</div>
-                  <div style={{fontSize:9,color:C.dim}}>{d.pct}% upset rate</div>
-                  <div style={{marginTop:6,height:3,background:C.border,borderRadius:2,overflow:"hidden"}}>
-                    <div style={{height:"100%",width:d.pct+"%",background:"linear-gradient(90deg,"+ac+"66,"+ac+")"}}/>
+          {/* Upset alerts — favorite still wins but dog is dangerous */}
+          <div style={{background:C.card,border:"1px solid #eab30844",borderRadius:12,overflow:"hidden"}}>
+            <div style={{padding:"10px 16px",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:"#eab308",borderBottom:"1px solid #eab30822",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              ⚡ UPSET ALERTS — Favorite wins but watch these
+              <span style={{marginLeft:"auto",fontSize:10,color:C.muted,fontWeight:400}}>Underdog has 35–49% chance — one of the most dangerous games each round</span>
+            </div>
+            <div style={{padding:10,display:"flex",flexDirection:"column",gap:4}}>
+              {upsetAlerts.length===0&&<div style={{padding:"16px",textAlign:"center",color:C.muted,fontSize:11,fontFamily:"'Barlow Condensed'"}}>No close games flagged.</div>}
+              {upsetAlerts.map((g,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 14px",borderRadius:7,background:"#eab30808",border:"1px solid #eab30833"}}>
+                  <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:18,color:"#eab308",minWidth:40,textAlign:"center"}}>{(g.dogProb*100).toFixed(0)}%</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,color:C.white,fontWeight:600,marginBottom:2}}>
+                      <span style={{color:"#eab308"}}>#{g.dogSeed} {g.dogTeam.name}</span>
+                      <span style={{color:C.dim,fontSize:10}}> vs #{g.favSeed} {g.favTeam.name}</span>
+                    </div>
+                    <div style={{fontSize:9,color:C.dim,fontFamily:"'Barlow Condensed'"}}>
+                      {g.round} · {g.region} Region · hist: {(g.histRate*100).toFixed(0)}% · {g.dataMode?"8-model":"BT+SOS"}
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
-            {analyzed.length===0&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:40,textAlign:"center",color:C.muted,fontFamily:"'Barlow Condensed'",fontSize:13,letterSpacing:1}}>
-              Analyze at least one region to see upset picks.<br/><span style={{fontSize:10,color:C.dim}}>Go to East / West / South / Midwest → FETCH AND ANALYZE REGION</span>
-            </div>}
-            {games.length>0&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-              <div style={{padding:"10px 16px",fontFamily:"'Barlow Condensed'",fontWeight:800,fontSize:13,letterSpacing:1.5,color:ac,borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                🔥 TOP UPSET PICKS — RANKED BY PROBABILITY
-                <span style={{marginLeft:"auto",fontSize:10,color:C.muted,fontWeight:400}}>{games.length} matchups with 20%+ upset chance · {analyzed.length} region{analyzed.length!==1?"s":""} analyzed</span>
-              </div>
-              <div style={{padding:10,display:"flex",flexDirection:"column",gap:6}}>
-                {games.map((g,i)=>{
-                  const pct=(g.dogProb*100).toFixed(0);
-                  const hPct=(g.histRate*100).toFixed(0);
-                  const isStrong=g.dogProb>=0.40;
-                  const col=isStrong?"#f97316":g.dogProb>=0.35?"#eab308":"#94a3b8";
-                  return(
-                    <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,background:isStrong?"#f9731608":"#eab30808",border:"1px solid "+(isStrong?"#f9731644":"#eab30844")}}>
-                      <div style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:20,color:col,minWidth:38,textAlign:"center"}}>{pct}%</div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
-                          <span style={{fontFamily:"'Barlow Condensed'",fontWeight:900,fontSize:11,color:col,background:col+"22",borderRadius:3,padding:"0 4px",flexShrink:0}}>#{g.dogSeed}</span>
-                          <span style={{fontSize:12,color:C.white,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.dogTeam.name}</span>
-                          {isStrong&&<span style={{fontSize:9,color:"#f97316",fontFamily:"'Barlow Condensed'",fontWeight:700,flexShrink:0}}>🔥 STRONG</span>}
-                        </div>
-                        <div style={{fontSize:10,color:C.muted}}>
-                          vs <span style={{color:C.dim}}>#{g.favSeed} {g.favTeam.name}</span> · <span style={{color:ac+"88",fontFamily:"'Barlow Condensed'"}}>{g.round}</span> · {g.region} Region
-                        </div>
-                      </div>
-                      <div style={{textAlign:"right",flexShrink:0}}>
-                        <div style={{fontSize:9,color:C.muted,fontFamily:"'Barlow Condensed'"}}>hist: {hPct}%</div>
-                        <div style={{fontSize:8,color:g.dataMode?"#22c55e66":C.dim}}>{g.dataMode?"8-model":"seed-based"}</div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>}
-            {games.length===0&&analyzed.length>0&&<div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:24,textAlign:"center",color:C.muted,fontFamily:"'Barlow Condensed'",fontSize:12}}>
-              No matchups with 20%+ upset probability found in analyzed regions.
-            </div>}
           </div>
-        );
-      })()}
+        </div>
+      )}
     </div>
   );
 }

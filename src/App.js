@@ -2468,6 +2468,109 @@ function NCAAOraclePage(){
     return{boost:Math.min(boost,maxBoost),flags};
   };
 
+  // ── 10-year Elite Eight upset pattern analysis (2015–2024) ──────────────────
+  // E8 upsets are rarest but most dramatic. One full week of film prep, physical exhaustion,
+  // and the "Final Four is right there" mental trap for favorites define this round.
+  // Key patterns from 2015-2024 E8 upsets:
+  //  1. Full Cinderella run (3+ wins) — Loyola 2018 (11), NC State 2024 (11), Syracuse 2016 (10)
+  //     These teams play fully loose while opponents feel the weight of expectations
+  //  2. "House money" — underdog already exceeded expectations; zero pressure vs max pressure
+  //  3. 8 UNC 2022 beat 1 Baylor — defending champ, brand name; UNC had elite metrics vs seed
+  //  4. 7 South Carolina 2017 — elite defense, veteran roster, Frank Martin coaching edge
+  //  5. Unique defensive system — Syracuse zone beat Michigan State 2-seed in 2016; 1 week prep
+  //  6. Opponent 3-game fatigue — favored teams have grinded; Cinderellas are energized by runs
+  //  7. NET rank underseeding — E8 upsets almost always involve teams whose metrics > seed
+  //  8. Vulnerable favorites — teams over-seeded by committee get exposed deepest in tournament
+  //  9. Veteran coaching advantage — Porter Moser, Frank Martin, Jim Boeheim: system > talent
+  // 10. Star on fire — a hot hand in E8 can single-handedly carry the underdog (Max Abmas style)
+  const calcE8UpsetBoost=(dog,fav)=>{
+    let boost=0;const flags=[];
+    const seedGap=dog.seed-fav.seed;
+    const dogExpNet=SEED_TO_NET_AVG[dog.seed]||(dog.seed*22);
+    const favExpNet=SEED_TO_NET_AVG[fav.seed]||(fav.seed*22);
+    const dogNet=dog.data?.kenpom_rank||null;
+    const favNet=fav.data?.kenpom_rank||null;
+    const dogRW=dog.roundsWon||0;
+    // 1. Full Cinderella run — 3 wins, zero pressure, peak momentum
+    // Loyola 2018 (11→6→9→7), NC State 2024 (11→6→2→4), Syracuse 2016 (10→7→11→1→)
+    if(dogRW>=3&&dog.seed>=10){boost+=0.25;flags.push("🏃 Elite Cinderella — 3 wins in, fully loose, at peak of run");}
+    else if(dogRW>=3&&dog.seed>=7){boost+=0.18;flags.push("🏃 Deep run — 3 tournament wins, playing with pure momentum");}
+    else if(dogRW>=2&&dog.seed>=6){boost+=0.10;flags.push("💫 Strong tournament run — 2 wins in, nothing to lose");}
+    // 2. "House money" mental edge — underdog plays loose; favorite feels Final Four pressure
+    // This is the defining E8 psychological factor — both 2016 and 2018 Cinderellas cited this
+    if(dogRW>=3){boost+=0.09;flags.push("🎲 Pure house money — already a success story; favorite has everything to lose");}
+    else if(dogRW>=2&&dog.seed>=7){boost+=0.05;flags.push("🎲 Underdog has zero pressure in E8");}
+    // 3. NET/KenPom underseeding — the analytics foundation of E8 upsets
+    // UNC 2022 was KenPom top-10 as an 8-seed; Loyola 2018 KenPom #19 as 11-seed
+    if(dogNet){
+      const under=dogExpNet-dogNet;
+      if(under>90){boost+=0.22;flags.push("📊 Massively underseeded — elite analytics; shouldn't be an underdog");}
+      else if(under>55){boost+=0.15;flags.push("📊 Underseeded by NET — 3 rounds of data confirm it");}
+      else if(under>30){boost+=0.08;flags.push("📊 Better metrics than seed suggests");}
+      else if(under>15){boost+=0.03;}
+    }
+    // 4. Over-seeded favorite — 3 rounds have exposed teams overrunning their KenPom
+    if(favNet){
+      const over=favNet-favExpNet;
+      if(over>80){boost+=0.18;flags.push("⚠️ Favorite severely over-seeded — 3 rounds of data now confirm it");}
+      else if(over>50){boost+=0.12;flags.push("⚠️ Favorite metrics below seed — exposure deepens in E8");}
+      else if(over>22){boost+=0.05;flags.push("⚠️ Favorite slightly over-seeded");}
+    }
+    // 5. Unique defensive system — zone/pack-line with 1 full week of prep still confounds
+    // Syracuse 2016 zone held Michigan State (2-seed) to their worst offensive performance
+    // Proxy: slow tempo + elite defense = system team with style-matchup advantage
+    if(dog.data?.opp&&dog.data?.tempo&&dog.data.tempo<66){
+      const benchD=70-(dog.seed*0.4);
+      const elite=benchD-dog.data.opp;
+      if(elite>8){boost+=0.14;flags.push("🔒 Unique system + slow tempo — even 1 week can't fully neutralize zone/pack-line");}
+      else if(elite>4){boost+=0.08;flags.push("🔒 Defensive system + pace control — exploits favorites at E8 level");}
+    }
+    // 6. Elite sustained defense — must have proven D through 3 consecutive tournament games
+    // South Carolina 2017 (AdjD top-20), Loyola 2018 (AdjD #5), UNC 2022 (elite D/rebounding)
+    if(dog.data?.opp&&dog.seed>=5){
+      const bench={5:65,6:66,7:67,8:67,9:68,10:68,11:67,12:66,13:69,14:71,15:73}[dog.seed]||68;
+      const elite=bench-dog.data.opp;
+      if(elite>13){boost+=0.18;flags.push("🛡 Elite D identity — top-15 nationally; proven through 3 tournament games");}
+      else if(elite>8){boost+=0.11;flags.push("🛡 Strong defensive program — game plan set for full week");}
+      else if(elite>4){boost+=0.05;flags.push("🛡 Above-avg defense vs seed level");}
+    }
+    // 7. Vulnerable favorite defense — 1 full week of film reveals every tendency
+    if(fav.data?.opp&&fav.seed<=3){
+      const bench={1:58,2:60,3:62}[fav.seed]||62;
+      const weak=fav.data.opp-bench;
+      if(weak>10){boost+=0.14;flags.push("🚨 Favorite weak D — fully exposed with 1 week of film");}
+      else if(weak>6){boost+=0.08;flags.push("🚨 Favorite porous perimeter D — maximum scouting exploitation");}
+      else if(weak>3){boost+=0.03;}
+    }
+    // 8. Tempo control — pace limits possessions; decisive in single-elimination E8
+    if(dog.data?.tempo){
+      if(dog.data.tempo<62){boost+=0.11;flags.push("🐢 Extreme pace control — slows E8 to a grind; limits fav's offensive rhythm");}
+      else if(dog.data.tempo<65){boost+=0.06;flags.push("🐢 Deliberate system — controls game flow in E8");}
+      else if(dog.data.tempo<68){boost+=0.02;}
+    }
+    // 9. Conference tournament winner — sustained peak form 5+ consecutive wins entering E8
+    if(dog.data?.conf_tourney_winner){boost+=0.08;flags.push("🏆 Conf. tourney winner — peak form sustained deepest into March");}
+    // 10. Conference Cinderella pedigree
+    const conf=dog.teamObj?.conf||"";
+    if(conf.includes("Missouri Valley")||conf==="MVC"){boost+=0.09;flags.push("💪 MVC — Loyola Chicago E8 pedigree; this conference makes Final Fours");}
+    else if(conf.includes("Ivy")){boost+=0.08;flags.push("🎓 Ivy in E8 — unprecedented run, veteran IQ, historically unique");}
+    else if(conf.includes("Atlantic 10")||conf.includes("A-10")){boost+=0.06;flags.push("💪 A-10 — physically tough, built for grinding E8 battles");}
+    else if(conf.includes("American")||conf.includes("Mountain West")){boost+=0.04;}
+    // 11. Elite eFG% — shooting explosion can end any favorite's tournament in one game
+    if(dog.data?.efg_pct&&dog.seed>=5){
+      if(dog.data.efg_pct>0.560){boost+=0.09;flags.push("🔥 Elite eFG% — explosive offense can beat anyone on a given E8 night");}
+      else if(dog.data.efg_pct>0.540){boost+=0.05;flags.push("🔥 Strong shooting efficiency vs seed");}
+    }
+    // 12. Turnover-forcing — maximum impact in E8 with 1 week of press/trap film prep
+    if(dog.data?.opp_tov_rate){
+      if(dog.data.opp_tov_rate>23){boost+=0.08;flags.push("💥 Elite turnover-forcing — 1 week of prep maximizes trap/press impact");}
+      else if(dog.data.opp_tov_rate>20){boost+=0.04;flags.push("💥 Strong turnover-forcing defense");}
+    }
+    // E8 cap — these are the most contested matchups; most conservative ceilings
+    const maxBoost=seedGap>=8?0.40:seedGap>=5?0.52:seedGap>=3?0.63:seedGap>=2?0.73:0.82;
+    return{boost:Math.min(boost,maxBoost),flags};
+  };
+
   // BT rating: seed (calibrated to 40yr history) + SOS + conf — no ESPN needed
   const btRating=(name,conf,seed)=>{
     const base=SEED_BT[Math.max(0,Math.min(15,(seed||8)-1))];
@@ -2514,11 +2617,11 @@ function NCAAOraclePage(){
     }
     let blended=Math.min(0.97,Math.max(0.03,modelP*(1-blendW)+histForT1*blendW));
     let upsetFlags=[];
-    // Apply 10-year upset pattern analysis for R64, R32, and S16
-    if((round==="R64"||round==="R32"||round==="S16")&&t1.seed!==t2.seed){
+    // Apply 10-year upset pattern analysis for R64, R32, S16, and E8
+    if((round==="R64"||round==="R32"||round==="S16"||round==="E8")&&t1.seed!==t2.seed){
       const dog=t1.seed>t2.seed?t1:t2;
       const fav=t1.seed>t2.seed?t2:t1;
-      const {boost,flags}=round==="R64"?calcR64UpsetBoost(dog,fav):round==="R32"?calcR32UpsetBoost(dog,fav):calcS16UpsetBoost(dog,fav);
+      const {boost,flags}=round==="R64"?calcR64UpsetBoost(dog,fav):round==="R32"?calcR32UpsetBoost(dog,fav):round==="S16"?calcS16UpsetBoost(dog,fav):calcE8UpsetBoost(dog,fav);
       if(boost>0){
         // Apply boost in log-odds space so probability stays bounded
         const dogIsT1=t1.seed>t2.seed;
@@ -2540,7 +2643,7 @@ function NCAAOraclePage(){
     const r32=[[0,1],[2,3],[4,5],[6,7]].map(([i,j])=>{const t1=r64[i].w,t2=r64[j].w;const g=runGame(t1,t2,"R32");const w=g.p>=0.5?adv(t1):adv(t2);return{t1,t2,p:g.p,w,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"R32",upsetFlags:g.upsetFlags||[]};});
     const s16=[[0,1],[2,3]].map(([i,j])=>{const t1=r32[i].w,t2=r32[j].w;const g=runGame(t1,t2,"S16");const w=g.p>=0.5?adv(t1):adv(t2);return{t1,t2,p:g.p,w,dataMode:g.dataMode,histRate:g.histRate,dogSeed:g.dogSeed,favSeed:g.favSeed,round:"S16",upsetFlags:g.upsetFlags||[]};});
     const g8=runGame(s16[0].w,s16[1].w,"E8");const w8=g8.p>=0.5?adv(s16[0].w):adv(s16[1].w);
-    return{r64,r32,s16,e8:{t1:s16[0].w,t2:s16[1].w,p:g8.p,w:w8,dataMode:g8.dataMode,histRate:g8.histRate,dogSeed:g8.dogSeed,favSeed:g8.favSeed,round:"E8"}};
+    return{r64,r32,s16,e8:{t1:s16[0].w,t2:s16[1].w,p:g8.p,w:w8,dataMode:g8.dataMode,histRate:g8.histRate,dogSeed:g8.dogSeed,favSeed:g8.favSeed,round:"E8",upsetFlags:g8.upsetFlags||[]}};
   };
 
   // Recompute all brackets whenever sels or store changes (instant BT fallback = always ready)
@@ -2608,7 +2711,7 @@ function NCAAOraclePage(){
     const upsetAlert=!isUpset&&dogProb>=0.36&&game.t1.seed!==game.t2.seed;
     const hRate=game.histRate||0;
     const flags=game.upsetFlags||[];
-    const hasFactors=flags.length>0&&(game.round==="R64"||game.round==="R32"||game.round==="S16");
+    const hasFactors=flags.length>0&&(game.round==="R64"||game.round==="R32"||game.round==="S16"||game.round==="E8");
     const borderCol=isUpset?"#f97316":upsetAlert?"#eab30888":hasFactors&&dogProb>0.30?"#94a3b855":C.border;
     const shortenName=(n)=>n.replace(" Blue Devils","").replace(" Wildcats","").replace(" Bulldogs","").replace(" Tigers","").replace(" Jayhawks","").replace(" Tar Heels","").replace(" Volunteers","").replace(" Gators","").replace(" Longhorns","").replace(" Trojans","").replace(" RedHawks","");
     const R=({team,prob,win})=>(

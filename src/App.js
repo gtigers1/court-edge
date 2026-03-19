@@ -977,6 +977,16 @@ const INITIAL_BRACKET_2026=(()=>{
   };
 })();
 
+// Returns the 2026 tournament seed (1-16) for a given ESPN team ID, or null if not in bracket.
+function getTeamSeed2026(teamId){
+  for(const seeds of Object.values(INITIAL_BRACKET_2026)){
+    for(const[seed,team] of Object.entries(seeds)){
+      if(team?.id===String(teamId))return parseInt(seed);
+    }
+  }
+  return null;
+}
+
 // Seed-implied AdjEM prior: NCAA committee seeding reflects real team quality.
 // If API data produces AdjEM far below what the seed implies, blend with this prior
 // to prevent stale/hallucinated stats from making a #3 seed look weaker than an #11 seed.
@@ -1390,7 +1400,7 @@ function NCAAMPage(){
       <SectionHeader label="Step 1 - Select Team 1" accent={C.amber} right={awayData&&<Pill label={awayAbbr+" LOADED"} color={C.amber}/>}/>
       <div style={{padding:14}}>
         <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
-          <div style={{flex:1}}><TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={awayTeam?.name||""} accent={C.amber} placeholder="Search team or conference..." disabled={awayLoading} onSelect={t=>{setAwayTeam(t);setAwayData(null);setResults(null);fetchTeam(t,"away");}}/></div>
+          <div style={{flex:1}}><TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={awayTeam?.name||""} accent={C.amber} placeholder="Search team or conference..." disabled={awayLoading} onSelect={t=>{setAwayTeam(t);setAwayData(null);setResults(null);fetchTeam(t,"away");const s=getTeamSeed2026(t.id);if(s)setAwaySeed(String(s));}}/></div>
           <div style={{width:64,flexShrink:0}}><div style={{fontSize:9,color:C.muted,letterSpacing:1,marginBottom:3,textTransform:"uppercase"}}>Seed</div><input type="number" min="1" max="16" placeholder="e.g. 5" value={awaySeed} onChange={e=>setAwaySeed(e.target.value)} style={{width:"100%",padding:"9px 8px",background:C.black,border:"1.5px solid "+C.border,borderRadius:7,color:C.amber,fontSize:13,outline:"none",fontFamily:"'Barlow Condensed'",fontWeight:700,textAlign:"center"}}/></div>
         </div>
         {awayLoading&&awayMsg&&<div style={{marginTop:6,fontSize:11,color:C.amber,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{awayMsg}</span></div>}
@@ -1405,7 +1415,7 @@ function NCAAMPage(){
       <SectionHeader label="Step 2 - Select Team 2" accent={C.copper} right={homeData&&<Pill label={homeAbbr+" LOADED"} color={C.copper}/>}/>
       <div style={{padding:14}}>
         <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
-          <div style={{flex:1}}><TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={homeTeam?.name||""} accent={C.copper} placeholder="Search team or conference..." disabled={homeLoading} onSelect={t=>{setHomeTeam(t);setHomeData(null);setResults(null);fetchTeam(t,"home");}}/></div>
+          <div style={{flex:1}}><TeamSelect items={NCAAM_TEAMS} getLabel={t=>t.name} getSub={t=>t.conf} getId={t=>t.id} displayValue={homeTeam?.name||""} accent={C.copper} placeholder="Search team or conference..." disabled={homeLoading} onSelect={t=>{setHomeTeam(t);setHomeData(null);setResults(null);fetchTeam(t,"home");const s=getTeamSeed2026(t.id);if(s)setHomeSeed(String(s));}}/></div>
           <div style={{width:64,flexShrink:0}}><div style={{fontSize:9,color:C.muted,letterSpacing:1,marginBottom:3,textTransform:"uppercase"}}>Seed</div><input type="number" min="1" max="16" placeholder="e.g. 1" value={homeSeed} onChange={e=>setHomeSeed(e.target.value)} style={{width:"100%",padding:"9px 8px",background:C.black,border:"1.5px solid "+C.border,borderRadius:7,color:C.copper,fontSize:13,outline:"none",fontFamily:"'Barlow Condensed'",fontWeight:700,textAlign:"center"}}/></div>
         </div>
         {homeLoading&&homeMsg&&<div style={{marginTop:6,fontSize:11,color:C.copper,fontFamily:"'Barlow Condensed'",letterSpacing:.5}}><span className="pulse">{homeMsg}</span></div>}

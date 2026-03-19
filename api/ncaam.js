@@ -8,12 +8,21 @@ export default async function handler(req, res) {
   const { teamId, team } = req.body || {};
   if (!teamId) return res.status(400).json({ error: "teamId required" });
 
+  // Track where each key stat came from for debugging
+  const sources = {};
+
   try {
-    // ── 1. ESPN: roster + team info (concurrent) ────────────────────────────
+    // ── 1. ESPN: roster + team info + statistics (concurrent) ───────────────
     const rosterUrl = `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}/roster`;
     const teamUrl   = `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}`;
-    const [rosterResp, teamResp] = await Promise.all([fetch(rosterUrl), fetch(teamUrl)]);
-    const [rosterJson, teamJson] = await Promise.all([rosterResp.json(), teamResp.json()]);
+    const statsUrl  = `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}/statistics`;
+
+    const [rosterResp, teamResp, statsResp] = await Promise.all([
+      fetch(rosterUrl), fetch(teamUrl), fetch(statsUrl)
+    ]);
+    const [rosterJson, teamJson, statsJson] = await Promise.all([
+      rosterResp.json(), teamResp.json(), statsResp.json()
+    ]);
 
     const recordSummary = teamJson?.team?.record?.items?.[0]?.summary || "0-0";
     const parts  = recordSummary.split("-");
@@ -27,9 +36,40 @@ export default async function handler(req, res) {
       (r.name||"").toLowerCase().includes("net")
     )?.current || null;
 
-    // ── 2. ESPN: schedule → rest days + rolling Elo + real PPG/OPP from scores ─
+    // ── 2a. ESPN statistics endpoint — most authoritative team averages ──────
+    // Parses the /statistics endpoint which ESPN computes from all season games.
+    // More reliable than AI and more complete than computing from game logs.
+    let espnStatPPG = null, espnStatOPP = null, espnStatTempo = null;
+    try {
+      const cats = statsJson?.results?.stats?.categories || [];
+      const findStat = (catNames, statNames) => {
+        for (const catName of catNames) {
+          const cat = cats.find(c =>
+            catName.test ? catName.test(c.name||"") : (c.name||"").toLowerCase().includes(catName)
+          );
+          if (!cat) continue;
+          for (const sn of statNames) {
+            const s = (cat.stats||[]).find(st =>
+              (st.name||"").toLowerCase() === sn.toLowerCase() ||
+              (st.abbreviation||"").toLowerCase() === sn.toLowerCase() ||
+              (st.displayName||"").toLowerCase().includes(sn.toLowerCase())
+            );
+            if (s?.value != null) return parseFloat(s.value);
+          }
+        }
+        return null;
+      };
+      espnStatPPG  = findStat(["scoring","general","offensive"], ["avgPoints","pointsPerGame","pts","ppg","points per game"]);
+      espnStatOPP  = findStat(["scoring","general","defensive"], ["avgPointsAgainst","pointsAllowed","opp","points against","opponent points"]);
+      espnStatTempo= findStat(["general","pace","tempo"],        ["possessions","pace","tempo","possessionsPerGame"]);
+      if (espnStatPPG  != null) sources.ppg  = "ESPN stats endpoint";
+      if (espnStatOPP  != null) sources.opp  = "ESPN stats endpoint";
+      if (espnStatTempo!= null) sources.tempo= "ESPN stats endpoint";
+    } catch(_) {}
+
+    // ── 2b. ESPN: schedule → rest days + rolling Elo + score-based PPG/OPP ──
     let daysSinceLastGame = 2, teamElo = 1500, teamGames = [];
-    let sSF = 0, sAG = 0, sCnt = 0; // season scoring from real game scores
+    let sSF = 0, sAG = 0, sCnt = 0;
     try {
       const schedResp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/${teamId}/schedule`);
       const schedJson = await schedResp.json();
@@ -47,7 +87,6 @@ export default async function handler(req, res) {
         const theirs = comp.competitors?.find(c => String(c.id) !== teamNumId);
         if (!ours || !theirs || ours.score == null || theirs.score == null) continue;
         const s = parseFloat(ours.score)||0, t = parseFloat(theirs.score)||0;
-        // Accumulate real game scores for PPG/OPP (more reliable than AI search)
         if (s > 0 || t > 0) { sSF += s; sAG += t; sCnt++; }
         const win    = s > t ? 1 : 0;
         const isHome = ours.homeAway === "home";
@@ -57,18 +96,17 @@ export default async function handler(req, res) {
         const expected = 1 / (1 + Math.pow(10, (1500 - effElo) / 400));
         teamElo += ELO_K * Math.max(0.5, Math.log(Math.abs(s-t)+1)/Math.log(15)) * (win - expected);
       }
-      // Margin of victory std dev: low = consistent, high = volatile
       if (margins.length > 3) {
         const mean = margins.reduce((a,b)=>a+b,0)/margins.length;
-        daysSinceLastGame = daysSinceLastGame; // already set
-        const variance = margins.reduce((s,m)=>s+Math.pow(m-mean,2),0)/margins.length;
-        // attach to a temp var; applied below after parsed
-        teamGames._marginStddev = parseFloat(Math.sqrt(variance).toFixed(1));
+        teamGames._marginStddev = parseFloat(Math.sqrt(margins.reduce((s,m)=>s+Math.pow(m-mean,2),0)/margins.length).toFixed(1));
       }
     } catch(_) {}
-    // Real scoring averages from ESPN game logs (overrides AI hallucinations)
-    const schedPPG = sCnt >= 10 ? parseFloat((sSF / sCnt).toFixed(1)) : null;
-    const schedOPP = sCnt >= 10 ? parseFloat((sAG / sCnt).toFixed(1)) : null;
+
+    // Schedule-computed PPG/OPP: lower threshold to 5 games (was 10)
+    const schedPPG = sCnt >= 5 ? parseFloat((sSF / sCnt).toFixed(1)) : null;
+    const schedOPP = sCnt >= 5 ? parseFloat((sAG / sCnt).toFixed(1)) : null;
+    if (schedPPG != null && sources.ppg == null) sources.ppg = `ESPN schedule scores (${sCnt} games)`;
+    if (schedOPP != null && sources.opp == null) sources.opp = `ESPN schedule scores (${sCnt} games)`;
 
     // ── 3. Extract player IDs + names from roster ────────────────────────────
     const athletes = rosterJson?.athletes || [];
@@ -91,13 +129,6 @@ export default async function handler(req, res) {
     }
 
     // ── 4. ESPN: per-game stats for every player (concurrent) ────────────────
-    // Correct endpoint: /common/v3/ path (the /site/v2/ statistics endpoint 404s for NCAAM).
-    // ESPN returns POSITIONAL string arrays — stats[] values map 1:1 to labels[].
-    // Verified structure from live API:
-    //   categories[0] = "averages", labels = ["GP","GS","MIN","FG","FG%","3PT","3P%",
-    //     "FT","FT%","OR","DR","REB","AST","BLK","STL","PF","TO","PTS"]
-    //   stats = positional strings e.g. ["33","33","25.2",...,"3.0","4.7",...,"7.7"]
-    //   PTS=index 17, REB=index 11, AST=index 12, MIN=index 2
     const fetchPlayerStats = async ({ id, name }) => {
       if (!id) return { name, espn: false };
       try {
@@ -106,31 +137,22 @@ export default async function handler(req, res) {
         );
         if (!r.ok) return { name, espn: false };
         const d = await r.json();
-
-        // Find the "averages" category (per-game stats)
         const cats   = d?.categories || [];
         const avgCat = cats.find(c => c.name === "averages") || cats[0];
         if (!avgCat) return { name, espn: false };
-
-        const labels   = avgCat.labels || [];   // ["GP","GS","MIN",...,"REB","AST",...,"PTS"]
-        const nameList = avgCat.names  || [];   // ["gamesPlayed","gamesStarted","avgMinutes",...,"avgPoints"]
-
-        // Pick the current season row — highest year, most games played if tie
+        const labels   = avgCat.labels || [];
+        const nameList = avgCat.names  || [];
         const rows = avgCat.statistics || [];
         const currentRow = rows.reduce((best, row) => {
           if (!best) return row;
           const bYear = best.season?.year || 0, rYear = row.season?.year || 0;
           if (rYear !== bYear) return rYear > bYear ? row : best;
-          // Same year: prefer more games played
           const bGP = parseFloat((best.stats||[])[0]) || 0;
           const rGP = parseFloat((row.stats ||[])[0]) || 0;
           return rGP > bGP ? row : best;
         }, null);
-
         if (!currentRow?.stats) return { name, espn: false };
-        const statsArr = currentRow.stats; // positional string array
-
-        // Look up a stat by its label ("PTS") or names-array entry ("avgPoints")
+        const statsArr = currentRow.stats;
         const getByLabel = (...keys) => {
           for (const k of keys) {
             let idx = labels.indexOf(k);
@@ -142,12 +164,10 @@ export default async function handler(req, res) {
           }
           return null;
         };
-
         const ppg = getByLabel("PTS", "avgPoints");
         const rpg = getByLabel("REB", "avgRebounds");
         const apg = getByLabel("AST", "avgAssists");
         const mpg = getByLabel("MIN", "avgMinutes");
-
         if (ppg === null && rpg === null) return { name, espn: false };
         return { name, ppg, rpg, apg, mpg, espn: true };
       } catch { return { name, espn: false }; }
@@ -155,12 +175,10 @@ export default async function handler(req, res) {
 
     const statsResults = await Promise.allSettled(playerEntries.map(fetchPlayerStats));
     const playerStats  = statsResults.map(r => r.status === "fulfilled" ? r.value : { espn: false });
-
-    // Names of players whose ESPN fetch failed (need AI to fill in stats)
     const needsAI   = playerStats.filter(p => !p.espn).map(p => p.name);
     const playerNames = playerEntries.map(p => p.name);
 
-    // ── 5. Perplexity: team stats + injury status + stats for ESPN-failed players
+    // ── 5. Perplexity: team stats + injury status ────────────────────────────
     const teamStatsSchema = JSON.stringify({
       wins:0, losses:0, ppg:75.0, opp:70.0, tempo:68.0,
       efg_pct:0.52, tov_rate:16.0, oreb_pct:0.30, ft_rate:0.35,
@@ -169,8 +187,6 @@ export default async function handler(req, res) {
       conference:"Big Ten", ranking:0, kenpom_rank:100
     });
 
-    // Roster block: if ESPN succeeded for a player, only ask for status.
-    // If ESPN failed, ask for full stats + status.
     const rosterSchemaBlock = playerNames.map(name => {
       const s = playerStats.find(p => p.name === name);
       if (s?.espn) return `{"name":"${name}","status":"PLAYING"}`;
@@ -179,14 +195,14 @@ export default async function handler(req, res) {
 
     const promptRules = [
       "wins/losses: current season record",
-      "ppg/opp: team season scoring averages",
+      "ppg/opp: team season scoring averages — double-check against KenPom or Barttorvik, NOT box score outliers",
       "tempo: possessions per 40 min (KenPom or Barttorvik)",
       "efg_pct as decimal (0.52 = 52%)",
       "opp_3p_pct: opponent 3-point % allowed this season (decimal, e.g. 0.320 = elite, 0.345 = average)",
       "opp_ftr: opponent free throw attempts / opponent field goal attempts (decimal, e.g. 0.28)",
       "conf_tourney_winner: true if team won their conference tournament this season",
       "ranking: AP poll rank, 0 if unranked",
-      "kenpom_rank: KenPom or NET rank (1-364)",
+      "kenpom_rank: KenPom or NET rank (1-364) — IMPORTANT: high-major teams (Big Ten, SEC, ACC) are typically ranked 1-80",
       "roster.status: search injury report — OUT=out/injured/suspended, DOUBTFUL=doubtful, QUESTIONABLE=day-to-day, PLAYING=healthy",
       needsAI.length ? `roster ppg/rpg/apg/mpg: season per-game averages (ONLY needed for: ${needsAI.join(", ")})` : null,
     ].filter(Boolean).join("\n- ");
@@ -232,69 +248,103 @@ Rules:
       raw = (fd.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").trim();
     }
 
-    // ── 6. Parse Perplexity response ─────────────────────────────────────────
+    // ── 6. Parse AI response ──────────────────────────────────────────────────
     let parsed = null;
     try { parsed = JSON.parse(raw); } catch(_) {}
     if (!parsed) { try { parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i,"").replace(/\s*```\s*$/,"")); } catch(_) {} }
     if (!parsed) { try { const i=raw.indexOf("{"),j=raw.lastIndexOf("}"); if(i>=0&&j>i) parsed=JSON.parse(raw.slice(i,j+1)); } catch(_) {} }
     if (!parsed) return res.status(500).json({ error: "Parse failed", raw: raw.slice(0,300) });
 
-    // ── 7. Apply team stat defaults ──────────────────────────────────────────
-    parsed.wins          = parsed.wins          || wins;
-    parsed.losses        = parsed.losses        || losses;
-    // ESPN real game scores are authoritative — prevents AI from hallucinating PPG/OPP
-    parsed.ppg           = schedPPG             || parsed.ppg || 75;
-    parsed.opp           = schedOPP             || parsed.opp || 70;
-    parsed.tempo         = parsed.tempo         || 68;
+    // ── 7. Merge sources: ESPN stats → schedule scores → AI (priority order) ─
+    // PPG/OPP: ESPN statistics endpoint is most authoritative (official ESPN averages).
+    // Schedule-computed from real scores is second. AI is last resort.
+    const finalPPG = espnStatPPG ?? schedPPG ?? parsed.ppg ?? 75;
+    const finalOPP = espnStatOPP ?? schedOPP ?? parsed.opp ?? 70;
+    if (!sources.ppg) sources.ppg = "AI (Perplexity)";
+    if (!sources.opp) sources.opp = "AI (Perplexity)";
+
+    parsed.wins   = parsed.wins   || wins;
+    parsed.losses = parsed.losses || losses;
+    parsed.ppg    = finalPPG;
+    parsed.opp    = finalOPP;
+    parsed.tempo  = espnStatTempo ?? parsed.tempo ?? 68;
     parsed.efg_pct       = parsed.efg_pct       || 0.52;
-    parsed.tov_rate      = parsed.tov_rate      || 16;
-    parsed.oreb_pct      = parsed.oreb_pct      || 0.30;
-    parsed.ft_rate       = parsed.ft_rate       || 0.35;
-    parsed.opp_efg_pct   = parsed.opp_efg_pct   || 0.50;
-    parsed.opp_tov_rate  = parsed.opp_tov_rate  || 16;
-    parsed.opp_oreb_pct       = parsed.opp_oreb_pct       || 0.28;
-    parsed.opp_3p_pct         = parsed.opp_3p_pct         || 0.335;
-    parsed.opp_ftr            = parsed.opp_ftr            || 0.30;
-    parsed.conf_tourney_winner= parsed.conf_tourney_winner|| false;
-    parsed.conference    = parsed.conference    || "Unknown";
-    parsed.ranking       = parsed.ranking       || 0;
-    parsed.kenpom_rank   = parsed.kenpom_rank   || 150;
+    parsed.tov_rate      = parsed.tov_rate       || 16;
+    parsed.oreb_pct      = parsed.oreb_pct       || 0.30;
+    parsed.ft_rate       = parsed.ft_rate        || 0.35;
+    parsed.opp_efg_pct   = parsed.opp_efg_pct    || 0.50;
+    parsed.opp_tov_rate  = parsed.opp_tov_rate   || 16;
+    parsed.opp_oreb_pct  = parsed.opp_oreb_pct   || 0.28;
+    parsed.opp_3p_pct    = parsed.opp_3p_pct     || 0.335;
+    parsed.opp_ftr       = parsed.opp_ftr        || 0.30;
+    parsed.conf_tourney_winner = parsed.conf_tourney_winner || false;
+    parsed.conference    = parsed.conference      || "Unknown";
+    parsed.ranking       = parsed.ranking         || 0;
+    parsed.kenpom_rank   = parsed.kenpom_rank     || 150;
     parsed.rest          = daysSinceLastGame;
     parsed.elo           = Math.round(teamElo);
     parsed.espn_id       = teamNumId;
     parsed.margin_stddev = teamGames._marginStddev || 10;
     parsed.games         = teamGames;
-    if (espnNetRank) parsed.kenpom_rank = espnNetRank;
 
-    // ── 8. Build final roster: ESPN stats (authoritative) + AI injury status ──
+    // ESPN NET rank overrides AI kenpom_rank when available (ESPN pulls from official NCAA NET)
+    if (espnNetRank) {
+      parsed.kenpom_rank = espnNetRank;
+      sources.kenpom_rank = "ESPN NET ranking";
+    } else {
+      sources.kenpom_rank = "AI (Perplexity)";
+    }
+
+    // ── 8. Sanity clamp — prevent impossible values from corrupting models ───
+    // These bounds represent the realistic range for any NCAA Division I team.
+    // Clamping here means bad AI data can't produce 97% results downstream.
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    parsed.ppg           = clamp(parsed.ppg,          55,  95);   // no team averages below 55 or above 95
+    parsed.opp           = clamp(parsed.opp,          50,  92);   // no D1 team allows fewer than 50 ppg
+    parsed.tempo         = clamp(parsed.tempo,         58,  82);   // KenPom tempo range for D1
+    parsed.efg_pct       = clamp(parsed.efg_pct,      0.38, 0.64);
+    parsed.tov_rate      = clamp(parsed.tov_rate,      8,   28);
+    parsed.oreb_pct      = clamp(parsed.oreb_pct,      0.15, 0.50);
+    parsed.ft_rate       = clamp(parsed.ft_rate,       0.15, 0.55);
+    parsed.opp_efg_pct   = clamp(parsed.opp_efg_pct,  0.38, 0.64);
+    parsed.opp_tov_rate  = clamp(parsed.opp_tov_rate,  8,   28);
+    parsed.opp_oreb_pct  = clamp(parsed.opp_oreb_pct,  0.15, 0.50);
+    parsed.opp_3p_pct    = clamp(parsed.opp_3p_pct,   0.25, 0.42);
+    parsed.opp_ftr       = clamp(parsed.opp_ftr,       0.15, 0.50);
+    parsed.kenpom_rank   = clamp(parseInt(parsed.kenpom_rank)||150, 1, 364);
+
+    // Net rating sanity: if ppg-opp implies an impossible net rating for the seed, log it
+    const netRating = parsed.ppg - parsed.opp;
+    sources.net_rating     = `${netRating > 0 ? "+" : ""}${netRating.toFixed(1)} PPG (${sources.ppg})`;
+    sources.schedule_games = sCnt;
+    sources.espn_stats_ppg = espnStatPPG;
+    sources.espn_stats_opp = espnStatOPP;
+    sources.sched_ppg      = schedPPG;
+    sources.sched_opp      = schedOPP;
+    sources.ai_ppg         = parsed.ppg;
+    parsed._sources        = sources;
+
+    // ── 9. Build final roster: ESPN stats (authoritative) + AI injury status ─
     const VALID_STATUS = new Set(["PLAYING","OUT","DOUBTFUL","QUESTIONABLE"]);
-
-    // Map from player name → injury status from Perplexity
     const injuryMap = {};
     for (const p of (parsed.roster || [])) {
       if (p.name) injuryMap[p.name] = VALID_STATUS.has(p.status) ? p.status : "PLAYING";
     }
-
-    // Map from player name → AI stats (for ESPN-failed players only)
     const aiStatsMap = {};
     for (const p of (parsed.roster || [])) {
       if (p.name && !playerStats.find(s => s.name === p.name && s.espn)) {
         aiStatsMap[p.name] = p;
       }
     }
-
     parsed.roster = playerStats.map(espnP => {
       const ai  = aiStatsMap[espnP.name] || {};
       const ppg = espnP.espn ? (espnP.ppg ?? 5)  : (ai.ppg || 5);
       const rpg = espnP.espn ? (espnP.rpg ?? 3)  : (ai.rpg || 3);
       const apg = espnP.espn ? (espnP.apg ?? 1)  : (ai.apg || 1);
       const mpg = espnP.espn ? (espnP.mpg ?? 25) : (ai.mpg || 25);
-
-      // PER: (ppg + weighted reb + weighted ast) normalised by √(mpg/30)
       const per = Math.round(((ppg * 1.0 + rpg * 0.6 + apg * 0.5) * Math.sqrt(Math.max(mpg, 10) / 30)) * 10) / 10;
       const role   = ppg > 15 ? "STAR" : ppg > 8 ? "KEY" : "ROLE";
       const status = injuryMap[espnP.name] || "PLAYING";
-
       return { name: espnP.name, ppg, rpg, apg, mpg, per, role, status };
     });
 

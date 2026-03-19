@@ -85,6 +85,39 @@ function TeamSelect({items,getLabel,getSub,getId,displayValue,onSelect,accent,di
   </div>;
 }
 
+// Shows where PPG, OPP, and KenPom rank came from so you can spot data quality issues instantly.
+// Green = ESPN official data, yellow = schedule computed, red = AI only.
+function DataSourceBadges({data,accent}){
+  const src=data?._sources||{};
+  const badge=(label,source,value)=>{
+    if(!source)return null;
+    const isEspn=source.startsWith("ESPN stats");
+    const isSched=source.startsWith("ESPN schedule");
+    const isAI=source.startsWith("AI");
+    const col=isEspn?"#22c55e":isSched?"#eab308":isAI?"#f87171":"#94a3b8";
+    const bg=isEspn?"#052e16":isSched?"#1c1400":isAI?"#2a0808":"#0f172a";
+    return(
+      <div key={label} style={{display:"flex",flexDirection:"column",gap:1,alignItems:"center",minWidth:80}}>
+        <div style={{fontSize:9,color:"#94a3b8",fontFamily:"'Barlow Condensed'",letterSpacing:.5,textTransform:"uppercase"}}>{label}</div>
+        <div style={{fontSize:11,color:col,fontFamily:"'Barlow Condensed'",fontWeight:700}}>{value}</div>
+        <div style={{fontSize:8,color:col,opacity:.8,textAlign:"center",fontFamily:"'Barlow Condensed'",letterSpacing:.3,maxWidth:90}}>{source}</div>
+      </div>
+    );
+  };
+  return(
+    <div style={{padding:"6px 14px 10px",borderTop:"1px solid #ffffff0d",display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-start"}}>
+      <div style={{fontSize:8,color:"#475569",fontFamily:"'Barlow Condensed'",letterSpacing:1,textTransform:"uppercase",paddingTop:8,whiteSpace:"nowrap"}}>Data sources</div>
+      {badge("PPG",src.ppg,data.ppg?.toFixed(1))}
+      {badge("OPP",src.opp,data.opp?.toFixed(1))}
+      {badge("NET Rank",src.kenpom_rank,"#"+(data.kenpom_rank||"?"))}
+      {src.schedule_games>0&&<div style={{display:"flex",flexDirection:"column",gap:1,alignItems:"center",minWidth:70}}>
+        <div style={{fontSize:9,color:"#94a3b8",fontFamily:"'Barlow Condensed'",letterSpacing:.5,textTransform:"uppercase"}}>Games used</div>
+        <div style={{fontSize:11,color:"#94a3b8",fontFamily:"'Barlow Condensed'",fontWeight:700}}>{src.schedule_games}</div>
+      </div>}
+    </div>
+  );
+}
+
 function RosterPanel({teamName,abbr,teamData,onCycle,sport,accent,loading}){
   const ac=accent||C.teal;
   if(loading) return <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:40,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12}}>
@@ -1283,6 +1316,7 @@ function NCAAMPage(){
         {awayError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{awayError}</div>}
       </div>
       {(awayLoading||awayData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={awayTeam?.name||""} abbr={awayAbbr} teamData={awayData} onCycle={n=>cyclePlayer("away",n)} sport="ncaam" accent={C.amber} loading={awayLoading}/></div>}
+      {awayData?._sources&&<DataSourceBadges data={awayData} accent={C.amber}/>}
     </div>
 
     {/* Team 2 */}
@@ -1297,6 +1331,7 @@ function NCAAMPage(){
         {homeError&&<div style={{marginTop:8,padding:"8px 12px",background:"#2a0f0f",border:"1px solid #5a2020",borderRadius:6,fontSize:11,color:"#f87171"}}>{homeError}</div>}
       </div>
       {(homeLoading||homeData)&&<div style={{padding:"0 14px 14px"}}><RosterPanel teamName={homeTeam?.name||""} abbr={homeAbbr} teamData={homeData} onCycle={n=>cyclePlayer("home",n)} sport="ncaam" accent={C.copper} loading={homeLoading}/></div>}
+      {homeData?._sources&&<DataSourceBadges data={homeData} accent={C.copper}/>}
     </div>
 
     {results&&<NCAAMResults results={results} awayTeam={awayTeam?.name||""} homeTeam={homeTeam?.name||""} awayAbbr={awayAbbr} homeAbbr={homeAbbr} tab={tab} setTab={setTab} onRecalc={runModels}/>}
